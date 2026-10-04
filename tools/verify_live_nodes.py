@@ -25,6 +25,19 @@ g = default_glossary()
 results: list[tuple[bool, str]] = []
 
 
+def _first_player_key(state: dict) -> str:
+    """取状态文件里的一个玩家键。
+
+    **不能写死 "1"** —— 单人局的键是 "1"，多人局则是 Steam ID
+    （实测：多人局 keys 形如 ['76561199029071077', '76561198412198880']）。
+    早先写死 "1" 时，只要有进行中的多人局，测试就会 KeyError 崩掉。
+    """
+    keys = list((state.get("players") or {}).keys())
+    if not keys:
+        raise SystemExit("状态文件里没有 players，无法构造增量样本")
+    return keys[0]
+
+
 def check(cond: bool, label: str, detail: str = "") -> None:
     results.append((bool(cond), label))
     print(f"  [{'✔' if cond else '✘'}] {label}" + (f"  —— {detail}" if detail else ""))
@@ -73,7 +86,7 @@ with tempfile.TemporaryDirectory() as td:
         cur["encounter"] = enc
         cur["segments"] = [{"turn_count": 0, "encounter": enc,
                             "room_label": f"房间{enc_i}", "point_type": "monster"}]
-        p = cur["players"]["1"]
+        p = cur["players"][_first_player_key(cur)]
         p["dpt"] = {}
         p["cpc"] = {}
         p["dmg_dealt"] = 0
@@ -96,7 +109,7 @@ with tempfile.TemporaryDirectory() as td:
         nxt = json.loads(json.dumps(prev))
         nxt["encounter"] = f"NEXT_{enc_i}"
         nxt["turn"] = 1
-        nxt["players"]["1"]["dpt"] = {}
+        nxt["players"][_first_player_key(nxt)]["dpt"] = {}
         for e in ad.diff(prev, nxt):
             bus.emit(e)
         prev = nxt

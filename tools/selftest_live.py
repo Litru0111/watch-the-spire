@@ -24,6 +24,19 @@ REAL = Path.home() / "AppData" / "Roaming" / "SlayTheSpire2" / "DamageMeter_comb
 results: list[tuple[bool, str]] = []
 
 
+def _first_player_key(state: dict) -> str:
+    """取状态文件里的一个玩家键。
+
+    **不能写死 "1"** —— 单人局的键是 "1"，多人局则是 Steam ID
+    （实测：多人局 keys 形如 ['76561199029071077', '76561198412198880']）。
+    早先写死 "1" 时，只要有进行中的多人局，测试就会 KeyError 崩掉。
+    """
+    keys = list((state.get("players") or {}).keys())
+    if not keys:
+        raise SystemExit("状态文件里没有 players，无法构造增量样本")
+    return keys[0]
+
+
 def check(cond: bool, label: str, detail: str = "") -> None:
     results.append((bool(cond), label))
     print(f"  [{'✔' if cond else '✘'}] {label}" + (f"  —— {detail}" if detail else ""))
@@ -73,7 +86,7 @@ check("turn" in st and "encounter" in st, "含 turn/encounter 字段",
 check(bool(st.get("events")), "含事件流", f"{len(st.get('events') or [])} 条")
 players = st.get("players") or {}
 check(bool(players), "含 players 段", ",".join(players.keys()))
-p1 = players.get("1") or {}
+p1 = players.get(_first_player_key(st)) or {}
 check(bool(p1.get("dpt")), "含 dpt 逐回合伤害", f"{len(p1.get('dpt') or {})} 个回合")
 check(bool(p1.get("cpc")), "含 cpc 每卡打出", f"{len(p1.get('cpc') or {})} 张卡")
 
@@ -123,7 +136,7 @@ with tempfile.TemporaryDirectory() as td:
     nxt = json.loads(json.dumps(before))
     new_turn = int(before.get("turn") or 0) + 1
     nxt["turn"] = new_turn
-    p = nxt["players"]["1"]
+    p = nxt["players"][_first_player_key(nxt)]
     p["dmg_dealt"] = int(p.get("dmg_dealt") or 0) + 17
     p.setdefault("dpt", {})[str(new_turn)] = 17
     p["cards_played"] = int(p.get("cards_played") or 0) + 1
@@ -176,7 +189,7 @@ with tempfile.TemporaryDirectory() as td:
     m1 = ad3.mtime()
     time.sleep(0.05)
     nxt["turn"] = new_turn + 1
-    nxt["players"]["1"].setdefault("dpt", {})[str(new_turn + 1)] = 5
+    nxt["players"][_first_player_key(nxt)].setdefault("dpt", {})[str(new_turn + 1)] = 5
     tmp.write_text(json.dumps(nxt, ensure_ascii=False), encoding="utf-8")
     os.utime(tmp, None)
     m2 = ad3.mtime()
@@ -194,7 +207,7 @@ with tempfile.TemporaryDirectory() as td:
     for e in ad4.initial_events(cur2):
         bus4.emit(e)
     turn_now = int(cur2.get("turn") or 0)
-    p4 = cur2["players"]["1"]
+    p4 = cur2["players"][_first_player_key(cur2)]
     prev4 = json.loads(json.dumps(cur2))
     ok_mid = True
     for card, dmg in (("打击", 12), ("小刀", 9)):
