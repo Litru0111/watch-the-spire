@@ -114,16 +114,21 @@ def game_dir(explicit: str | os.PathLike | None = None) -> Path | None:
     """游戏安装目录（含 `data_sts2_windows_x86_64/`）。找不到返回 None。
 
     优先级：显式参数 > `STS2MON_GAME` > Steam 库文件解析 > 常见路径探测。
+
+    如果用户**显式**指定了目录但不存在，会往 stderr 发一条警告再继续探测 ——
+    静默回退会让人以为设置生效了（实测踩过：把变量指向错误路径，
+    程序却用自动探测的结果跑完了，看不出任何异常）。
     """
-    for cand in (explicit, os.environ.get(ENV_GAME)):
-        if cand:
-            p = Path(cand).expanduser()
-            if p.is_dir():
-                return p
-            # 允许传入上一级（steamapps/common）
-            alt = p / _GAME_FOLDER
-            if alt.is_dir():
-                return alt
+    for cand, src in ((explicit, "--game 参数"), (os.environ.get(ENV_GAME), ENV_GAME)):
+        if not cand:
+            continue
+        p = Path(cand).expanduser()
+        if p.is_dir():
+            return p
+        alt = p / _GAME_FOLDER          # 允许传上一级（steamapps/common）
+        if alt.is_dir():
+            return alt
+        print(f"[!] {src} 指向的目录不存在: {p}（继续自动探测）", file=sys.stderr)
     for lib in _steam_libraries():
         p = lib / "steamapps" / "common" / _GAME_FOLDER
         if p.is_dir():

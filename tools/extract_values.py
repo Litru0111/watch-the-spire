@@ -362,9 +362,12 @@ def prop_name(m: Metadata, tok: int) -> str:
 
 
 def main() -> int:
-    if not DLL.is_file():
-        print(f"找不到 {DLL}")
-        return 1
+    # DLL 为 None 表示「没找到游戏安装目录」，此时不能再调 .is_file()（会崩）
+    if DLL is None or not DLL.is_file():
+        print(f"找不到 sts2.dll（{DLL or '游戏目录未定位'}）")
+        print("用环境变量 STS2MON_GAME 指向游戏安装目录，例如：")
+        print(r'  set STS2MON_GAME=D:\SteamLibrary\steamapps\common\Slay the Spire 2')
+        return 2
     m = Metadata(DLL)
     m.typedefs()                        # 预热
 

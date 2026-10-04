@@ -198,11 +198,24 @@ def pick(entry: dict, field: str) -> tuple[str, str]:
 
 
 def main() -> int:
+    if GAME is None:
+        print("找不到游戏安装目录。用 --game 或环境变量 STS2MON_GAME 指定，例如：")
+        print(r'  set STS2MON_GAME=D:\SteamLibrary\steamapps\common\Slay the Spire 2')
+        return 2
     raw: dict[str, dict] = {}
-    targets: list[tuple[str, Path]] = [("游戏本体", GAME / "SlayTheSpire2.pck")]
-    for p in sorted(WORKSHOP.glob("*/*.pck")):
-        if p.stat().st_size > 100_000:
-            targets.append((p.parent.name, p))
+    # 用 paths.pck_path()（它会兼容 .pck.bytes 之类命名），而不是自己拼文件名
+    pck = paths.pck_path()
+    if pck is None:
+        print("找不到游戏 pck（确认游戏目录下有 SlayTheSpire2.pck）")
+        return 2
+    targets: list[tuple[str, Path]] = [("游戏本体", pck)]
+    # 创意工坊可能不存在（没订阅任何 mod 很正常），此时 WORKSHOP 为 None
+    if WORKSHOP is not None:
+        for p in sorted(WORKSHOP.glob("*/*.pck")):
+            if p.stat().st_size > 100_000:
+                targets.append((p.parent.name, p))
+    else:
+        print("（未找到创意工坊目录，只提取游戏本体）")
     total = 0
     print(f"扫描 {len(targets)} 个 pck…")
     for label, p in targets:
