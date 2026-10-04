@@ -17,9 +17,20 @@ from .model import (ActState, CardStat, Combat, EventRecord, MapNode, PlayerStat
 
 class Tracker:
     def __init__(self, run_id: str = "", glossary: Glossary | None = None,
-                 on_update: Callable[[RunState, Event], None] | None = None) -> None:
+                 on_update: Callable[[RunState, Event], None] | None = None,
+                 local_player_id: str = "") -> None:
         self.g = glossary or default_glossary()
         self.run = RunState(run_id=run_id or "live", live=True, source="live")
+        # 启动时就能确定的本机身份（如存档目录 `steam/<id>/` 里的那个账号）。
+        # 玩的时候 `current_run.save` 往往还没写（离开该层才写），
+        # 若没有这个兜底，多人局就无从判断谁是本机 —— 实测表现为
+        # 「实时面板本机 HP 一直为空、三个人 is_local 全是 0」。
+        if local_player_id:
+            self.run.local_player_id = str(local_player_id)
+            # 必须**同时**确立 run.local_player：否则 _pkey 在玩家还没出现时
+            # 会退回默认的 "1"，于是 run_start / combat_start 这类不带玩家键的
+            # 事件就落到一个不存在的玩家上，界面多出一列（实测踩过）。
+            self._reconcile_local(str(local_player_id))
         self._node_seq = 0
         self._order = 0
         self._stage_floor = 0     # 数据源自报的楼层（回放会写进 segments[0].floor）
@@ -74,12 +85,23 @@ class Tracker:
         注意与 RunState.local_player 的区别：那个是**对局级**的本机标记，
         由存档/历史给定；这里只是「事件带的玩家 key」，两者在多数据源下
         可能取不同的值，所以不能混用。
+
+        取值优先级：`data.player_key` > `ev.key` > `data.player_id` > 本机/第一位。
+
+        `data.player_id` 这一档不能少：`current_run` 适配器把**权威本机 ID**
+        放在那里（存档里 players[].id），却没有设 `ev.key`。
+        早先不读它，存档发的 HP/金币就会落到「第一位玩家」身上 ——
+        多人局里那往往是别人（实测：合成本机键 "1" 抢到 HP，本机反而 None）。
         """
         explicit = ev.data.get("player_key")
         if explicit:
             return str(explicit)
         if ev.kind in self._PLAYER_SCOPED and ev.key:
             return str(ev.key)
+        # 事件自报的玩家（存档源用这个，是权威本机 ID）
+        pid = ev.data.get("player_id")
+        if pid:
+            return str(pid)
         # 事件没带玩家信息时，归到本机玩家（或第一位）
         run = self.run
         return run.local_player or (run.players[0].player_id if run.players else "1")
@@ -100,21 +122,68 @@ class Tracker:
         if p is None:
             p = RunPlayer(player_id=key, name=name or f"玩家{key}",
                           character=char_id, character_name=self._char_name(char_id),
-                          is_local=(not self.run.players))
+                          is_local=self._is_local_key(key))
             self.run.players.append(p)
-            if p.is_local and not self.run.local_player:
+            if p.is_local and self.run.local_player != key:
                 self.run.local_player = key
         else:
-            if char_id and not p.character:
+            # 后到的真值要能覆盖占位符。
+            # `_ensure_combat` 会在 combat_start 时就先建出玩家（那时还没带
+            # char_id/name），所以这里不能只在「字段为空」时才补 ——
+            # 否则本机的角色/名字会一直停在占位符上（实测踩过）。
+            if char_id and (not p.character or p.character != char_id):
                 p.character = char_id
-                p.character_name = self._char_name(char_id)
-            if name and not p.name:
+                nm2 = self._char_name(char_id)
+                if nm2:
+                    p.character_name = nm2
+            if name and self._is_placeholder_name(p.name):
                 p.name = name
+            # 后到的权威身份可以**纠正**早先的猜测
+            if self._is_local_key(key) and not p.is_local:
+                p.is_local = True
+                self.run.local_player = key
         # 兼容字段：队长视角
         if self.run.players and self.run.players[0] is p:
             self.run.character = p.character
             self.run.character_name = p.character_name
         return p
+
+    @staticmethod
+    def _is_placeholder_name(name: str) -> bool:
+        """这个名字是不是自动生成的占位符（而不是真实玩家名）。
+
+        占位符形态：`玩家1` / `玩家76561198412198880`（见 `_track_player`）。
+        占位符应该被后到的真名覆盖。
+        """
+        n = str(name or "")
+        return (not n) or n.startswith("玩家")
+
+    def _is_local_key(self, key: str) -> bool:
+        """这个玩家 key 是不是本机。
+
+        **不能靠出现顺序猜**。早先的规则是「第一个被登记的玩家就是本机」，
+        在多人局里必然出错：DamageMeter 先报一个合成的 `"1"` 键，
+        它就被标成本机并锁定 `run.local_player`，而真正的本机（Steam ID）
+        永远不会被标上 —— 于是实时面板的本机 HP/金币一直是 `None`
+        （实测踩过）。
+
+        现在只认两种可靠信号：
+          1. `key` 等于已知的权威本机 ID（来自存档路径里的 `steam/<id>/`）
+          2. 已知这局**就是单人**（player_count == 1），此时唯一的玩家即本机
+        """
+        if not key:
+            return False
+        k = str(key)
+        local = str(self.run.local_player_id or "")
+        if local and k == local:
+            return True
+        # 已知本机是某个 Steam ID，那别的 key（如合成 "1"）就不是本机
+        if local:
+            return False
+        # 尚无权威 ID 时，只在「确定单人」的情况下认
+        if self.run.player_count == 1:
+            return True
+        return False
 
     def _combat_for(self, ev: Event) -> Combat:
         """取（或新建）这条事件所属玩家的战斗记录。"""
@@ -151,7 +220,37 @@ class Tracker:
         mods = ev.data.get("modifiers")
         if mods:
             self.run.modifiers = [str(m) for m in mods]
+        # 权威本机身份与人数：只在非空时覆盖（不掌握它的数据源不该抹掉）
+        lid = str(ev.data.get("local_player_id") or "")
+        if lid and self.run.local_player_id != lid:
+            self.run.local_player_id = lid
+            self._reconcile_local(lid)
+        pc = int(ev.data.get("player_count") or 0)
+        if pc and self.run.player_count != pc:
+            self.run.player_count = pc
+            self._reconcile_local(self.run.local_player_id)
         self.run.live = True
+
+    def _reconcile_local(self, local_id: str = "") -> None:
+        """拿到权威本机身份后，纠正早先基于顺序猜出来的 is_local。
+
+        多人局里 DamageMeter 可能先报一个合成键（`"1"`）—— 旧规则会把它
+        标成本机并锁定 `run.local_player`；等存档给出真实 Steam ID 时
+        必须把标记挪过去，否则实时面板会一直显示一个不存在的人
+        （实测：本机 HP 恒为 None）。
+        """
+        lid = str(local_id or self.run.local_player_id or "")
+        if not lid:
+            return
+        for p in self.run.players:
+            p.is_local = (p.player_id == lid)
+        self.run.local_player = lid
+        me = next((p for p in self.run.players if p.is_local), None)
+        if me:
+            if me.character:
+                self.run.character = me.character
+            if me.character_name:
+                self.run.character_name = me.character_name
 
     def _on_run_end(self, ev: Event) -> None:
         self.run.live = False
@@ -380,9 +479,24 @@ class Tracker:
         return c
 
     def _on_combat_start(self, ev: Event) -> None:
+        """新一场战斗开始。
+
+        **必须按遭遇去重**：`COMBAT_START` 在多人局里会被每个玩家各发一次
+        （而且适配器发的那条不带玩家键），无脑 `pop + 重建` 的后果是
+        每来一条就重建一次 —— 实测留下一条玩家键为合成的 `"1"` 的幻影战斗，
+        界面上多出一个不存在的玩家栏（3 人局显示 4 列）。
+        """
+        enc = ev.encounter_id or ""
+        # 换遭遇：把所有玩家在**旧遭遇**下的战斗记录清掉（新遭遇重新累积）
+        if self._cur is not None and enc and enc != getattr(self, "_combat_enc", ""):
+            for pid in list(self._combats):
+                if self._combats[pid].encounter_id != enc:
+                    self._combats.pop(pid, None)
+            self._combat_enc = enc
         key = self._pkey(ev)
-        self._combats.pop(key, None)
-        c = self._ensure_combat(ev)
+        if key and key not in self._combats:
+            self._ensure_combat(ev)
+        c = self._combats.get(key) or self._ensure_combat(ev)
         if ev.data.get("hp") is not None:
             c.player_hp_start = ev.data["hp"]
         if ev.data.get("enemy_hp") is not None:
@@ -434,6 +548,12 @@ class Tracker:
             c = self._ensure_combat(ev)
 
         pid = self._pkey(ev)
+        # **无条件登记玩家**：`_track_player` 以前只在 `_ensure_combat`（战斗尚不存在时）
+        # 和「带 HP/gold」两条路径被调，而战斗中的 PLAYER_STAT 走的是
+        # `c = self._combats.get(...)` —— 战斗已存在就不会再调，
+        # 于是玩家的 char_id / 名字永远补不上（实测：本机一直显示占位符名字与空角色）。
+        self._track_player(pid, str(d.get("char_id") or ""),
+                           str(d.get("player_name") or ""))
         authoritative = bool(d.get("hp_authoritative"))
         if node is not None and (d.get("hp") is not None
                                  or d.get("max_hp") is not None

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .adapters import (AnalyticsAdapter, CombatStateAdapter, CurrentRunAdapter,
                        HistoryAdapter, RdpsAdapter, RunEndWatcher, RunTokenAdapter,
-                       find_run_files)
+                       find_current_run_files, find_run_files)
 from .analytics import Analytics
 from .events import Event, EventBus, K
 from .glossary import Glossary, default_glossary
@@ -44,8 +44,23 @@ class Ctx:
         self.db = Path(db) if db else paths.db_path()
         self.store = Store(self.db)
         self.g: Glossary = default_glossary()
-        self.live = LiveState(self.g)
+        # 本机身份要在**启动时**就确定：玩的时候 current_run.save 还没写
+        # （离开该层才写），没有它就无法判断多人局里谁是本机 ——
+        # 实测表现为「实时面板本机 HP 一直为空、三名玩家 is_local 全是 0」。
+        # 兜底来源：存档目录 `steam/<id>/` 里的那个账号（只会是你自己）。
+        self.live = LiveState(self.g, local_player_id=self._known_local_id())
         self.quiet = quiet
+
+    def _known_local_id(self) -> str:
+        """启动时能确定的本机 Steam ID（取不到返回空串）。"""
+        for f in find_current_run_files():
+            try:
+                sid = CurrentRunAdapter(glossary=self.g, path=f).local_steam_id()
+            except Exception:
+                sid = ""
+            if sid:
+                return sid
+        return paths.local_steam_id_hint()
 
     def say(self, *a) -> None:
         if not self.quiet:

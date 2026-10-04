@@ -101,12 +101,22 @@ class CurrentRunAdapter:
         if len(players) == 1:
             return players[0]
         # 多人局：必须按 Steam ID 认，不能取第一个（顺序不固定）
-        local = local_steam_id(self.path) if getattr(self, "path", None) else ""
+        local = self.local_steam_id()
         if local:
             for p in players:
                 if str(p.get("id") or "") == local:
                     return p
         return players[0]
+
+    def local_steam_id(self) -> str:
+        """本机 Steam ID（从存档**路径**里取；取不到返回空串）。
+
+        这是判定「本机玩家」最可靠的依据：`.run` 与 `current_run.save` 里
+        都没有 local_player_id 字段（实测恒为 None），只有路径里的
+        `steam/<id>/` 是确定的。供 `me()` 与事件流共用，
+        这样 tracker 也能拿到同一个权威值，不必靠「第一个玩家」猜。
+        """
+        return local_steam_id(self.path) if getattr(self, "path", None) else ""
 
     def snapshot(self, st: dict[str, Any] | None) -> dict[str, Any]:
         """整理出「实时状态」需要的一组真实数值。
@@ -437,6 +447,10 @@ class CurrentRunAdapter:
             character=str(snap.get("character") or ""),
             data={"game_mode": snap.get("game_mode") or "standard",
                   "modifiers": snap.get("modifiers") or [],
+                  # 权威本机身份：tracker 靠它判定 is_local，而不是靠
+                  # 「第一个出现的玩家」猜（多人局里那会认错人，实测踩过）
+                  "local_player_id": self.local_steam_id(),
+                  "player_count": len(st.get("players") or []),
                   "hp_authoritative": True}))
 
         # 补齐**所有已经走过的楼层**：监控可能是中途启动的，

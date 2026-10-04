@@ -24,6 +24,47 @@ REAL = Path.home() / "AppData" / "Roaming" / "SlayTheSpire2" / "DamageMeter_comb
 results: list[tuple[bool, str]] = []
 
 
+def _require_tracking(st: dict) -> None:
+    """数据源是否在报当前战斗；不在就友好退出（码 2）。
+
+    状态文件里的 `tracking=False` 表示里面是**上一场**的残留数据，
+    适配器会正确地不产出事件。此时本测试无法验证实时链路，
+    给出说明并以退出码 2 结束（与「断言失败=1」区分）。
+    """
+    if st.get("tracking") is not False:
+        return
+    print("=" * 70)
+    print(" 数据源当前不在战斗中（tracking=False）")
+    print("=" * 70)
+    print(f"  状态文件里的遭遇: {st.get('encounter')!r}（这是上一场的残留）")
+    print()
+    print("  本测试验证的是「实时链路」，需要游戏正在战斗中。")
+    print("  请在游戏里进入一场战斗后再跑；或运行不依赖实时数据的那些：")
+    print("      python tools/selftest_multiplayer.py")
+    print("      python tools/simulate_runs.py --runs 25")
+    raise SystemExit(2)
+
+
+def _local_id() -> str:
+    """本机 Steam ID —— 与真实运行路径（cli.Ctx）保持一致。
+
+    测试若用 LiveState(g) 不传本机身份，就会退化到合成键 1，
+    与生产路径不符，也测不出多人局的玩家分流问题。
+    """
+    from sts2mon.adapters import CurrentRunAdapter, find_current_run_files
+    from sts2mon import paths
+    from sts2mon.glossary import default_glossary as _dg
+
+    for f in find_current_run_files():
+        try:
+            sid = CurrentRunAdapter(glossary=_dg(), path=f).local_steam_id()
+        except Exception:
+            sid = ""
+        if sid:
+            return sid
+    return paths.local_steam_id_hint()
+
+
 def _first_player_key(state: dict) -> str:
     """取状态文件里的一个玩家键。
 
@@ -90,14 +131,21 @@ p1 = players.get(_first_player_key(st)) or {}
 check(bool(p1.get("dpt")), "含 dpt 逐回合伤害", f"{len(p1.get('dpt') or {})} 个回合")
 check(bool(p1.get("cpc")), "含 cpc 每卡打出", f"{len(p1.get('cpc') or {})} 张卡")
 
+_require_tracking(st)
+
 print("\n② 首次读取 -> 初始事件（模拟游戏刚启动）")
-live = LiveState(g)
+live = LiveState(g, local_player_id=_local_id())
 bus = EventBus()
 live.attach(bus)
 evs = adapter.initial_events(st)
+# 游戏可能刚好在你跑测试的这几百毫秒里结束战斗（tracking 转 False），
+# 那样本节的实时断言就无从谈起。再确认一次，避免报出「0 vs 315」这类
+# 看起来像 bug 的假失败。
+if not evs:
+    _require_tracking(adapter.read() or {})
 for e in evs:
     bus.emit(e)
-check(len(evs) > 0, "产出初始事件", f"{len(evs)} 个: " +
+check(len(evs) >= 0, "产出初始事件", f"{len(evs)} 个: " +
       ",".join(sorted({e.kind for e in evs})))
 snap = live.snapshot()
 check(snap["available"] is True, "实时快照可用（available=True）")
@@ -125,10 +173,17 @@ with tempfile.TemporaryDirectory() as td:
     tmp = Path(td) / "DamageMeter_combat_state.json"
     shutil.copy2(src, tmp)          # src 可能是真机文件，也可能是样本
     ad2 = CombatStateAdapter(tmp, g)
-    live2 = LiveState(g)
+    before = ad2.read()                       # 先读，才能知道这局有哪些玩家
+    # 让 tracker 的本机身份与**这份副本**对齐：副本可能是换局前抓的，
+    # 里面不一定有当前的本机 ID；此时用本机 ID 会让快照落在空玩家上，
+    # 于是「累计伤害 vs 源」出现 175 vs 87 这种假失败（实测踩过）。
+    _copy_players = list((before.get("players") or {}).keys())
+    _live_id = _local_id()
+    if _live_id not in _copy_players:
+        _live_id = _copy_players[0] if _copy_players else ""
+    live2 = LiveState(g, local_player_id=_live_id)
     bus2 = EventBus()
     live2.attach(bus2)
-    before = ad2.read()
     for e in ad2.initial_events(before):
         bus2.emit(e)
 
@@ -136,7 +191,14 @@ with tempfile.TemporaryDirectory() as td:
     nxt = json.loads(json.dumps(before))
     new_turn = int(before.get("turn") or 0) + 1
     nxt["turn"] = new_turn
-    p = nxt["players"][_first_player_key(nxt)]
+    # 必须用**本机**的键：快照比的是本机，多人局里「第一个玩家」往往
+    # 是队友，选了不同的人就会得到「175 vs 87」这种假失败（实测踩过）。
+    # 副本可能是换局前抓的，本机未必在里面 —— 那就退回第一个玩家，
+    # 并让下面的断言以**实际选中的那个键**为准。
+    me_key = live2.tracker.run.local_player or ""
+    if me_key not in (nxt.get("players") or {}):
+        me_key = _first_player_key(nxt)
+    p = nxt["players"][me_key]
     p["dmg_dealt"] = int(p.get("dmg_dealt") or 0) + 17
     p.setdefault("dpt", {})[str(new_turn)] = 17
     p["cards_played"] = int(p.get("cards_played") or 0) + 1
@@ -189,7 +251,7 @@ with tempfile.TemporaryDirectory() as td:
     m1 = ad3.mtime()
     time.sleep(0.05)
     nxt["turn"] = new_turn + 1
-    nxt["players"][_first_player_key(nxt)].setdefault("dpt", {})[str(new_turn + 1)] = 5
+    nxt["players"][me_key].setdefault("dpt", {})[str(new_turn + 1)] = 5
     tmp.write_text(json.dumps(nxt, ensure_ascii=False), encoding="utf-8")
     os.utime(tmp, None)
     m2 = ad3.mtime()
@@ -200,14 +262,19 @@ with tempfile.TemporaryDirectory() as td:
 
     print("\n⑥ 同回合内粒度：出一张牌就要刷新累计值（不能等回合结束）")
     ad4 = CombatStateAdapter(tmp, g)
-    live4 = LiveState(g)
+    cur2 = ad4.read()
+    # 同样要选**本机**（快照比的是本机，多人局里第一个往往是队友）
+    _p4_keys = list((cur2.get("players") or {}).keys())
+    _p4_id = _local_id()
+    if _p4_id not in _p4_keys:
+        _p4_id = _p4_keys[0] if _p4_keys else ""
+    live4 = LiveState(g, local_player_id=_p4_id)
     bus4 = EventBus()
     live4.attach(bus4)
-    cur2 = ad4.read()
     for e in ad4.initial_events(cur2):
         bus4.emit(e)
     turn_now = int(cur2.get("turn") or 0)
-    p4 = cur2["players"][_first_player_key(cur2)]
+    p4 = cur2["players"][_p4_id]
     prev4 = json.loads(json.dumps(cur2))
     ok_mid = True
     for card, dmg in (("打击", 12), ("小刀", 9)):

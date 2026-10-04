@@ -284,6 +284,12 @@ class RunState:
     badges: list[dict[str, Any]] = field(default_factory=list)
     players: list[RunPlayer] = field(default_factory=list)   # 多人对局：每人在此
     local_player: str = ""        # 本机玩家 id（rdps/实时数据以它为主视角）
+    # 权威本机身份：存档路径里的 steam/<id>。与 local_player 的区别是
+    # 它**在拿到存档前**就能确定，所以 tracker 靠它判定 is_local，
+    # 而不是靠「第一个出现的玩家」猜（多人局会认错人）。
+    local_player_id: str = ""
+    # 已知的玩家人数（0 = 未知）。用于「确定单人」时才敢认定唯一玩家是本机。
+    player_count: int = 0
     source: str = ""
     live: bool = False
     current_floor: int = 0

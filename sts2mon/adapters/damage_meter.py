@@ -183,13 +183,19 @@ class CombatStateAdapter:
                                 turn=int(st.get("turn") or 0), node_id=node_id,
                                 source="damage_meter",
                                 data={"point_type": _encounter_type(enc), "floor": floor}))
-            data = {**self._player_state(st), "floor": floor}
+            # **逐玩家**发 PLAYER_STAT。DamageMeter 把每人数据分块存在
+            # players.<steamid>，只发一条（取 self.player_key，多人局里
+            # 该键不存在 → 退回第一个玩家）会让事件流里只有一个人，
+            # 本机的伤害/出牌全丢（实测踩过）。
+            keys = self.player_keys(st) or [""]
             taken = self._enemy_damage_by_turn(st)
-            if taken:
-                data["taken_by_turn"] = taken
-            events.append(Event(kind=K.PLAYER_STAT, run_id=run_id, encounter_id=enc,
-                                turn=int(st.get("turn") or 0), node_id=node_id,
-                                source="damage_meter", data=data))
+            for pk in keys:
+                data = {**self._player_state(st, pk), "floor": floor}
+                if taken:
+                    data["taken_by_turn"] = taken
+                events.append(Event(kind=K.PLAYER_STAT, run_id=run_id, encounter_id=enc,
+                                    turn=int(st.get("turn") or 0), node_id=node_id,
+                                    key=pk, source="damage_meter", data=data))
             # 首次读取要补齐「整场战斗到目前为止」的卡牌贡献，
             # 否则实时面板的卡牌表在开局是空的（增量路径只反映之后的变化）。
             events.extend(self.card_snapshot(st, run_id, enc, int(st.get("turn") or 0),
@@ -237,20 +243,26 @@ class CombatStateAdapter:
         之后的增量必须从这条基线往上加。
         """
         out: list[Event] = []
-        p = self._player(st) or {}
+        # 逐玩家：多人局每人一条卡牌贡献，否则只有一个人的表
+        keys = self.player_keys(st) or [""]
         self._cpc_encounter = enc
-        self._cpc_base = {k: int(v or 0) for k, v in (p.get("cpc") or {}).items()}
-        for field, attr in CARD_MAPS.items():
-            for card_id, val in (p.get(field) or {}).items():
-                cid = self.g.canonical(card_id)
-                if not cid or not self.g.is_known(cid):
-                    continue        # 跳过脏数据条目
-                out.append(Event(kind=K.CARD_STAT, run_id=run_id, encounter_id=enc,
-                                 turn=turn, node_id=node_id, key=cid,
-                                 name=self.g.card(cid), label=self.g.card(cid),
-                                 value=int(val or 0), source="damage_meter",
-                                 data={attr: int(val or 0),
-                                       "player_key": self.player_key}))
+        # 基线按 (玩家, 卡牌) 记，与 _combo_diff 的增量和保持一致
+        self._cpc_base = {}
+        for pk in keys:
+            p = self._player(st, pk) or {}
+            for card_id, val in (p.get("cpc") or {}).items():
+                self._cpc_base[(pk, card_id)] = int(val or 0)
+            for field, attr in CARD_MAPS.items():
+                for card_id, val in (p.get(field) or {}).items():
+                    cid = self.g.canonical(card_id)
+                    if not cid or not self.g.is_known(cid):
+                        continue        # 跳过脏数据条目
+                    out.append(Event(kind=K.CARD_STAT, run_id=run_id, encounter_id=enc,
+                                     turn=turn, node_id=node_id, key=cid,
+                                     name=self.g.card(cid), label=self.g.card(cid),
+                                     value=int(val or 0), source="damage_meter",
+                                     data={attr: int(val or 0),
+                                           "player_key": pk}))
         return out
 
     def diff(self, prev: dict[str, Any] | None, cur: dict[str, Any]) -> list[Event]:
@@ -307,9 +319,12 @@ class CombatStateAdapter:
             events.append(Event(kind=K.COMBAT_START, run_id=run_id, encounter_id=enc,
                                 turn=turn, node_id=node_id, source="damage_meter",
                                 data={"point_type": _encounter_type(enc), "floor": floor}))
-            events.append(Event(kind=K.PLAYER_STAT, run_id=run_id, encounter_id=enc,
-                                turn=turn, node_id=node_id, source="damage_meter",
-                                data={**self._player_state(cur), "floor": floor}))
+            # 逐玩家发（多人局每人一条），见 initial_events 里的说明
+            for pk in (self.player_keys(cur) or [""]):
+                events.append(Event(kind=K.PLAYER_STAT, run_id=run_id, encounter_id=enc,
+                                    turn=turn, node_id=node_id, key=pk,
+                                    source="damage_meter",
+                                    data={**self._player_state(cur, pk), "floor": floor}))
             # 新场次第一回合的明细事件照常补上
             events.extend(self._event_delta(prev, cur, run_id, enc, node_id))
             events.extend(self._combo_diff(prev, cur, run_id, enc, turn, node_id))
@@ -333,27 +348,34 @@ class CombatStateAdapter:
 
     def _stat_delta(self, prev: dict[str, Any], cur: dict[str, Any], run_id: str,
                     enc: str, turn: int, node_id: str = "") -> list[Event]:
-        """累计数值有变化时才补发一次玩家状态快照（绝对值，幂等）。"""
-        a = self._player_state(prev)
-        b = self._player_state(cur)
+        """累计数值有变化时才补发一次玩家状态快照（绝对值，幂等）。
+
+        **逐玩家**比对与发事件 —— 多人局里各人的数值独立变化，
+        只发一条（取第一个玩家）会让本机的变化被漏掉。
+        """
         watched = ("player_damage_dealt", "player_damage_taken", "player_block",
                    "player_blocked", "player_energy_spent", "player_energy_wasted",
                    "cards_played", "cards_drawn", "cards_discarded", "cards_exhausted",
                    "overkill", "max_hit", "hp", "max_hp", "gold")
-        changed = any(a.get(k) != b.get(k) for k in watched)
-        # dpt 也要盯：它决定逐回合曲线
-        changed = changed or (a.get("dpt") != b.get("dpt"))
-        if not changed:
-            return []
         seg = self._segment(cur)
-        data = {**b, "floor": self._floor_of(seg)}
-        # 数据源不提供我方 HP，但提供了「每次挨打多少」的明细，
-        # 按回合汇总后交给 Tracker，这样逐回合承伤就是真实值而不是估算。
         taken = self._enemy_damage_by_turn(cur)
-        if taken:
-            data["taken_by_turn"] = taken
-        return [Event(kind=K.PLAYER_STAT, run_id=run_id, encounter_id=enc,
-                      turn=turn, node_id=node_id, source="damage_meter", data=data)]
+        out: list[Event] = []
+        for pk in (self.player_keys(cur) or self.player_keys(prev) or [""]):
+            a = self._player_state(prev, pk)
+            b = self._player_state(cur, pk)
+            changed = any(a.get(k) != b.get(k) for k in watched)
+            changed = changed or (a.get("dpt") != b.get("dpt"))
+            if not changed:
+                continue
+            data = {**b, "floor": self._floor_of(seg)}
+            # 数据源不提供我方 HP，但提供了「每次挨打多少」的明细，
+            # 按回合汇总后交给 Tracker，这样逐回合承伤就是真实值而不是估算。
+            if taken:
+                data["taken_by_turn"] = taken
+            out.append(Event(kind=K.PLAYER_STAT, run_id=run_id, encounter_id=enc,
+                             turn=turn, node_id=node_id, key=pk,
+                             source="damage_meter", data=data))
+        return out
 
     def _enemy_damage_by_turn(self, st: dict[str, Any]) -> dict[str, int]:
         """从事件流里汇总「我方每个回合分别挨了多少伤害」。
@@ -395,18 +417,22 @@ class CombatStateAdapter:
         return self.g.is_card(source)
 
     # ---- 各类增量 ----
-    def _player_state(self, st: dict[str, Any] | None) -> dict[str, Any]:
+    def _player_state(self, st: dict[str, Any] | None,
+                      key: str = "") -> dict[str, Any]:
         """把 players.<id> 里的累计字段整理成 PLAYER_STAT 的 data。
 
         注意：DamageMeter **不记录我方 HP/金币**（实测字段表里没有 hp/max_hp），
         所以这里不会伪造这些值；界面会如实标注。
+
+        `key` 指定取哪位玩家；同时把 `player_key` 放进 data，
+        这样 tracker 能确定这条事件属于谁（否则会归到「第一位」）。
         """
-        p = self._player(st) or {}
+        p = self._player(st, key) or {}
         data: dict[str, Any] = {src: int(p.get(k) or 0) for k, src in PLAYER_CUMULATIVE.items()}
         data["max_hit_card"] = p.get("max_hit_card") or ""
-        for key in ("hp", "max_hp", "gold", "block", "turn_taken", "block_total"):
-            if p.get(key) is not None:
-                data[key] = int(p[key])
+        for k in ("hp", "max_hp", "gold", "block", "turn_taken", "block_total"):
+            if p.get(k) is not None:
+                data[k] = int(p[k])
         # dpt：每个回合各自的伤害值（不是增量），供逐回合曲线使用
         dpt = p.get("dpt")
         if isinstance(dpt, dict) and dpt:
@@ -415,6 +441,9 @@ class CombatStateAdapter:
             data["char_id"] = p["char_id"]
         if p.get("name"):
             data["player_name"] = p["name"]
+        pk = str(key or p.get("key") or self.player_key)
+        if pk:
+            data["player_key"] = pk
         return data
 
     def all_players(self, st: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
@@ -435,12 +464,15 @@ class CombatStateAdapter:
         """
         events: list[Event] = []
         turn = int(cur.get("turn") or 0)
-        data = self._player_state(cur)
         seg = self._segment(cur)
         floor = self._floor_of(seg)
-        events.append(Event(kind=K.PLAYER_STAT, run_id=run_id, encounter_id=enc, turn=turn,
-                            node_id=node_id, source="damage_meter",
-                            data={**data, "floor": floor}))
+        # 逐玩家（多人局每人一条），理由见 initial_events
+        for pk in (self.player_keys(cur) or [""]):
+            data = self._player_state(cur, pk)
+            events.append(Event(kind=K.PLAYER_STAT, run_id=run_id, encounter_id=enc,
+                                turn=turn, node_id=node_id, key=pk,
+                                source="damage_meter",
+                                data={**data, "floor": floor}))
         events.extend(self._event_delta(prev, cur, run_id, enc, node_id))
         events.extend(self._combo_diff(prev, cur, run_id, enc, turn, node_id))
         return events
@@ -576,45 +608,72 @@ class CombatStateAdapter:
 
     def _combo_diff(self, prev: dict[str, Any], cur: dict[str, Any], run_id: str,
                     enc: str, turn: int, node_id: str = "") -> list[Event]:
-        """每卡打出次数的增量。
+        """每卡打出次数的增量（**逐玩家分别记账**）。
 
         基线由适配器自己维护（`_cpc_base`）：初始快照已把当时的总次数计入，
         之后的增量必须是「当前值 - 基线」，否则会重复计数。
         只处理名称库里认识的规范 ID，过滤数据源里的脏条目。
+
+        键必须是 `(玩家, 卡牌)`：多人局里两人都可能打出同一张牌，
+        只按卡牌记基线会把两个人的次数混在一起（实测踩过）。
         """
         out: list[Event] = []
-        p_cur = self._player(cur) or {}
-        cpc_cur = p_cur.get("cpc") or {}
         if self._cpc_encounter != enc:
             # 换场次：基线重来
             self._cpc_encounter = enc
             self._cpc_base = {}
-        elif not self._cpc_base:
-            # 首读没有走 initial_events 时，用 prev 状态铺一次基线
-            self._cpc_base = {k: int(v or 0) for k, v in
-                              ((self._player(prev) or {}).get("cpc") or {}).items()}
-        for card_id, val in cpc_cur.items():
-            total = int(val or 0)
-            delta = total - int(self._cpc_base.get(card_id, 0))
-            if delta <= 0:
+        for pk in (self.player_keys(cur) or self.player_keys(prev) or [""]):
+            p_cur = self._player(cur, pk) or {}
+            cpc_cur = p_cur.get("cpc") or {}
+            if not cpc_cur:
                 continue
-            cid = self.g.canonical(card_id)
-            if not cid or not self.g.is_known(cid):
-                self._cpc_base[card_id] = total      # 脏条目也推进基线，避免反复触发
-                continue
-            self._cpc_base[card_id] = total
-            out.append(Event(kind=K.CARD_PLAY, run_id=run_id, encounter_id=enc,
-                             turn=turn, key=cid, value=delta, node_id=node_id,
-                             name=self.g.card(cid), label=self.g.card(cid),
-                             source="damage_meter",
-                             data={"plays": total, "player_key": self.player_key}))
+            if not any(k[0] == pk for k in self._cpc_base):
+                # 首读没有走 initial_events 时，用 prev 状态铺一次基线
+                p_prev = self._player(prev, pk) or {}
+                for k, v in (p_prev.get("cpc") or {}).items():
+                    self._cpc_base[(pk, k)] = int(v or 0)
+            for card_id, val in cpc_cur.items():
+                total = int(val or 0)
+                bkey = (pk, card_id)
+                base = int(self._cpc_base.get(bkey, 0))
+                delta = total - base
+                if delta <= 0:
+                    continue
+                cid = self.g.canonical(card_id)
+                if not cid or not self.g.is_known(cid):
+                    self._cpc_base[bkey] = total   # 脏条目也推进基线，避免反复触发
+                    continue
+                self._cpc_base[bkey] = total
+                out.append(Event(kind=K.CARD_PLAY, run_id=run_id, encounter_id=enc,
+                                 turn=turn, key=cid, value=delta, node_id=node_id,
+                                 name=self.g.card(cid), label=self.g.card(cid),
+                                 source="damage_meter",
+                                 data={"plays": total, "player_key": pk}))
         return out
 
-    def _player(self, st: dict[str, Any] | None) -> dict[str, Any] | None:
+    def _player(self, st: dict[str, Any] | None,
+                key: str = "") -> dict[str, Any] | None:
+        """取某个玩家的数据。
+
+        `key` 为空时退回 `self.player_key`（最后退回第一个玩家）。
+        **多人局必须显式传 key**：本文件按玩家分块存 `players.<steamid>`，
+        而 `self.player_key` 的默认值 `"1"` 是单人局的键；多人局里没有它，
+        于是会「退回第一个玩家」—— 实测那一局里第一个恰好是队友，
+        导致事件流里**只有队友的数据**，本机的伤害/出牌全丢，
+        界面上本机一栏永远是空的。所以调用方要**遍历所有玩家**分别取。
+        """
         if not st:
             return None
         players = st.get("players") or {}
+        if key:
+            return players.get(str(key))
         return players.get(self.player_key) or (next(iter(players.values())) if players else None)
+
+    def player_keys(self, st: dict[str, Any] | None) -> list[str]:
+        """本场出现过的所有玩家键（多人局逐人发事件用）。"""
+        if not st:
+            return []
+        return [str(k) for k in (st.get("players") or {})]
 
     # ------------------------------------------------------------ 实时轮询
     def watch(self, bus: EventBus, interval: float = 0.5,

@@ -25,6 +25,27 @@ g = default_glossary()
 results: list[tuple[bool, str]] = []
 
 
+def _require_tracking(st: dict) -> None:
+    """数据源是否在报当前战斗；不在就友好退出（码 2）。
+
+    状态文件里的 `tracking=False` 表示里面是**上一场**的残留数据，
+    适配器会正确地不产出事件。此时本测试无法验证实时链路，
+    给出说明并以退出码 2 结束（与「断言失败=1」区分）。
+    """
+    if st.get("tracking") is not False:
+        return
+    print("=" * 70)
+    print(" 数据源当前不在战斗中（tracking=False）")
+    print("=" * 70)
+    print(f"  状态文件里的遭遇: {st.get('encounter')!r}（这是上一场的残留）")
+    print()
+    print("  本测试验证的是「实时链路」，需要游戏正在战斗中。")
+    print("  请在游戏里进入一场战斗后再跑；或运行不依赖实时数据的那些：")
+    print("      python tools/selftest_multiplayer.py")
+    print("      python tools/simulate_runs.py --runs 25")
+    raise SystemExit(2)
+
+
 def _first_player_key(state: dict) -> str:
     """取状态文件里的一个玩家键。
 
@@ -70,11 +91,23 @@ with tempfile.TemporaryDirectory() as td:
                     events=[{"t": 1, "turn": 3, "p": "1", "l": "灵魂异鱼 → 8", "v": 8}],
                     cards={"STRIKE_SILENT": 8, "SHIV": 22})
     ad = CombatStateAdapter(tmp, g)
-    live = LiveState(g)
+    # 与真实运行路径一致：带上本机身份，否则会退化到合成键 "1"
+    from sts2mon.adapters import CurrentRunAdapter, find_current_run_files
+    from sts2mon import paths as _paths
+    _sid = ""
+    for _f in find_current_run_files():
+        try:
+            _sid = CurrentRunAdapter(glossary=g, path=_f).local_steam_id()
+        except Exception:
+            _sid = ""
+        if _sid:
+            break
+    live = LiveState(g, local_player_id=_sid or _paths.local_steam_id_hint())
     bus = EventBus()
     live.attach(bus)
 
     base = json.loads(tmp.read_text(encoding="utf-8"))
+    _require_tracking(base)
     for e in ad.initial_events(base):
         bus.emit(e)
 

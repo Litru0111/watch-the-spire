@@ -29,10 +29,16 @@ from .tracker import Tracker
 class LiveState:
     """线程安全地持有「当前实时对局状态」。"""
 
-    def __init__(self, glossary: Glossary | None = None) -> None:
+    def __init__(self, glossary: Glossary | None = None,
+                 local_player_id: str = "") -> None:
         self.g = glossary or default_glossary()
         self._lock = threading.RLock()
-        self.tracker = Tracker("live", self.g)
+        # local_player_id：启动时就能确定的本机身份（存档目录里的 Steam ID）。
+        # 玩的时候 current_run.save 还没写，没有它就无法判断多人局里谁是本机。
+        # 必须存成属性 —— 换局与 reset 都会**新建** Tracker，新建时不带上它
+        # 就会丢（实测：启动时设好了，一换局又变回「不知道谁在本机」）。
+        self._local_player_id = str(local_player_id or "")
+        self.tracker = Tracker("live", self.g, local_player_id=self._local_player_id)
         self.last_event: Event | None = None
         self.last_change = 0.0
         self.current_node_id = ""
@@ -74,7 +80,8 @@ class LiveState:
                     if prev.win is None and not prev.killed_by:
                         prev.notes["ended_reason"] = "被新对局取代（未记录到结束事件）"
                     self._notify_finished(prev)
-                self.tracker = Tracker(ev.run_id, self.g)
+                self.tracker = Tracker(ev.run_id, self.g,
+                                       local_player_id=self._local_player_id)
                 self.current_encounter = ""
                 self.current_node_id = ""
                 self._taken_by_turn = {}
@@ -110,7 +117,8 @@ class LiveState:
     def reset(self) -> None:
         with self._lock:
             keep = self.tracker.run.run_id
-            self.tracker = Tracker(keep, self.g)
+            self.tracker = Tracker(keep, self.g,
+                                   local_player_id=self._local_player_id)
             self.current_encounter = ""
             self.current_node_id = ""
             self._taken_by_turn = {}
