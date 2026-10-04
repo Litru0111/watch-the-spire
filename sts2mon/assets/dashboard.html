@@ -151,8 +151,12 @@
           display:flex;gap:9px;align-items:center}
   .runrow:hover{background:var(--hover);border-color:var(--line)}
   .runrow.on{background:var(--panel2);border-color:var(--accent)}
-  .runrow .who{font-weight:620}
-  .runrow .meta{color:var(--dim);font-size:11px}
+  .runrow .who{font-weight:620;display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+  /* 角色名/队长名不能被折成两行（窄栏里「铁甲战士」会被拆成「铁甲战 / 士」）*/
+  .runrow .who > span:first-child{white-space:nowrap}
+  .runrow .who .pill{white-space:nowrap}
+  .runrow .leader{white-space:nowrap}
+  .runrow .meta{color:var(--dim);font-size:11px;overflow-wrap:anywhere}
   .layout{display:grid;grid-template-columns:300px 1fr;gap:12px;height:100%;min-height:0}
   .layout > div{min-height:0;display:flex;flex-direction:column;gap:11px}
   /* 对局详情：头部固定高度（一行摘要），主体左右分栏。
@@ -845,6 +849,8 @@ function renderRunList(){
       <div style="flex:1">
         <div class="who">${esc(r.character||'未知')} ${r.ascension?`<span class="dim">A${r.ascension}</span>`:''}
           ${isMulti(r)?`<span class="pill gold" style="border-color:var(--gold);color:var(--gold)">多人 ${r.player_count||''}人</span>`:''}
+          ${isMulti(r) && r.leader_character && r.leader_character !== r.character
+            ? `<span class="dim leader" title="多人局里队长（第一顺位）的角色 · 本机不是队长">队长 ${esc(r.leader_character)}</span>` : ''}
           ${modeBadge(r)}</div>
         ${(r.badges||[]).length?`<div class="runbadges">${badgePills(r.badges, 4)}`+
           ((r.badges||[]).length>4?`<span class="dim">+${r.badges.length-4}</span>`:'')+`</div>`:''}

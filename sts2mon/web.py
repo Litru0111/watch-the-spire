@@ -30,6 +30,20 @@ from .summary import summarize
 ASSETS = Path(__file__).resolve().parent / "assets"
 
 
+def _char_name(g: Glossary, raw: Any) -> str:
+    """角色 ID / 名字 → 显示名；拿不到或只是占位符时返回空串。
+
+    占位符 `?` / `未知` 必须当**未知**处理：早期实时采集在还没拿到角色 ID 时
+    把词典兜底的 `?` 写进了库，界面上就显示成一堆「?」（实测踩过）。
+    """
+    s = str(raw or "").strip()
+    if not s or s in ("?", "？", "未知", "None"):
+        return ""
+    # 形如 CHARACTER.SILENT / SILENT 的 ID 走词典；已是中文名就直接用
+    nm = g.char(s) if (s.isupper() or s.startswith("CHARACTER")) else s
+    return "" if not nm or nm in ("?", "？", "未知") else nm
+
+
 class Dashboard:
     """把 Store / Analytics / 实时状态打包成 HTTP 服务。"""
 
@@ -171,40 +185,45 @@ class Dashboard:
 
                 if path == "/api/runs":
                     rows = dash.store.all_run_rows()
-                    # 对局 id → 称号（每人一套，取本机玩家的；单人局即唯一玩家）。
-                    # 预先算好，避免每行都去查一次 players 表（N+1 查询）。
-                    badge_by_run: dict[str, list] = {}
+                    # 预先算好每行的「本机 / 队长」信息，避免每行都查一次 players 表
+                    # （N+1 查询）。列表标题显示**本机角色**：多人局里
+                    # `runs.character_name` 存的是**队长**的角色，而本机往往不是队长 ——
+                    # 实测 14 场多人局里 13 场因此显示成队友的角色（如本机是静默猎手，
+                    # 却显示成铁甲战士）。players 表里每人的 is_local / character 齐全，
+                    # 所以按本机取。
+                    meta_by_run: dict[str, dict] = {}
                     for r in rows:
                         ps = dash.store.players(str(r["run_id"]))
-                        mine = next((p for p in ps if p.get("is_local")), None) \
-                            or (ps[0] if ps else None)
-                        if mine and mine.get("badges"):
-                            badge_by_run[str(r["run_id"])] = effects.badges(mine["badges"])
+                        mine = next((p for p in ps if p.get("is_local")), None)
+                        lead = ps[0] if ps else None
+                        local_ch = _char_name(dash.g, (mine or {}).get("character"))
+                        lead_ch = _char_name(dash.g, (lead or {}).get("character"))
+                        meta_by_run[str(r["run_id"])] = {
+                            "local": local_ch,
+                            "leader": lead_ch,
+                            "mine": (mine or {}).get("badges") or [],
+                        }
 
                     def char_of(r):
-                        """对局的角色显示名。
+                        """对局的角色显示名（**本机优先**）。
 
-                        注意占位符 `?` 必须**当未知处理**：早期实时采集在还没拿到
-                        角色 ID 时把词典兜底的 `?` 写进了库，界面上就显示成一堆
-                        「?」（实测踩过）。这里逐级回退：库里名字 → 库里角色 ID
-                        → 玩家表 → 名称表解析，全都拿不到才留空由前端显示「未知」。
+                        顺序：players 表里本机的角色 → runs.character_name（队长）
+                        → 兜底。占位符 `?` 必须当未知处理：早期实时采集在还没拿到
+                        角色 ID 时把词典兜底的 `?` 写进了库（实测踩过）。
                         """
+                        m = meta_by_run.get(str(r["run_id"])) or {}
+                        if m.get("local"):
+                            return m["local"]
                         for v in (r.get("character_name"), r.get("character")):
-                            s = str(v or "").strip()
-                            if s and s not in ("?", "？", "未知"):
-                                nm = dash.g.char(s) if s.upper() == s else s
-                                if nm and nm not in ("?", "？"):
-                                    return nm
-                        for p in dash.store.players(str(r["run_id"])):
-                            s = str(p.get("character") or "").strip()
-                            if s:
-                                nm = dash.g.char(s)
-                                if nm and nm not in ("?", "？"):
-                                    return nm
-                        return ""
+                            nm = _char_name(dash.g, v)
+                            if nm:
+                                return nm
+                        return m.get("leader") or ""
 
                     return self._json({"runs": [
                         {"run_id": r["run_id"], "character": char_of(r),
+                         # 多人局里另外给出队长角色，界面可标注「队长是 X」
+                         "leader_character": (meta_by_run.get(str(r["run_id"])) or {}).get("leader", ""),
                          "ascension": r["ascension"], "win": None if r["win"] is None else bool(r["win"]),
                          "live": bool(r["live"]), "abandoned": bool(r["abandoned"]),
                          "floors": r["floors"], "combats": r["combats"], "turns": r["turns"],
@@ -218,8 +237,9 @@ class Dashboard:
                          "modifiers": r.get("modifiers") or [],
                          "modifier_names": [dash.g.name(m)
                                             for m in (r.get("modifiers") or [])],
-                         # 对局结束获得的称号（每人一套，列表取本机/第一位）
-                         "badges": badge_by_run.get(str(r["run_id"]), []),
+                         # 对局结束获得的称号（每人一套，取本机）
+                         "badges": effects.badges(
+                             (meta_by_run.get(str(r["run_id"])) or {}).get("mine") or []),
                          "deck_size": r["deck_size"], "relic_count": r["relic_count"]}
                         for r in rows]})
 

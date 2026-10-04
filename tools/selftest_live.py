@@ -134,7 +134,14 @@ check(bool(p1.get("cpc")), "含 cpc 每卡打出", f"{len(p1.get('cpc') or {})} 
 _require_tracking(st)
 
 print("\n② 首次读取 -> 初始事件（模拟游戏刚启动）")
-live = LiveState(g, local_player_id=_local_id())
+# 本机身份必须与**这份数据**对得上：走真机文件时是存档里的 Steam ID，
+# 走合成样本时样本用的是键 "1"。不对齐就会「事件有、快照却是 0」
+# —— 快照按本机键取数，而那个键在数据里不存在（实测踩过）。
+_p1_keys = list((st.get("players") or {}).keys())
+_live_id = _local_id()
+if _live_id not in _p1_keys:
+    _live_id = _p1_keys[0] if _p1_keys else ""
+live = LiveState(g, local_player_id=_live_id)
 bus = EventBus()
 live.attach(bus)
 evs = adapter.initial_events(st)
