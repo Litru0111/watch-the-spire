@@ -23,6 +23,11 @@ sys.path.insert(0, str(ROOT))
 from sts2mon.adapters.current_run import CurrentRunAdapter  # noqa: E402
 from sts2mon.adapters.history import HistoryAdapter, _modifier_ids  # noqa: E402
 from sts2mon.glossary import default_glossary  # noqa: E402
+from _guard import require_extracted  # noqa: E402
+
+# 修正项中文名（MODIFIER.DRAFT → 选牌）来自 card_effects.json，
+# 这是**间接依赖**：静态扫描看不出，只有跑起来调用 G.name() 才会暴露。
+require_extracted("card_effects.json")
 
 G = default_glossary()
 # 假的 Steam ID（只用来拼构造存档路径）。真实账号 ID 不该进公开仓库。

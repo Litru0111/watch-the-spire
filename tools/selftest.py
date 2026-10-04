@@ -21,6 +21,7 @@ from sts2mon.glossary import default_glossary  # noqa: E402
 from sts2mon.live import LiveState, start_replay  # noqa: E402
 from sts2mon.model import Store  # noqa: E402
 from sts2mon.web import Dashboard  # noqa: E402
+from _guard import require_saves  # noqa: E402
 from sts2mon import paths
 
 PASS, FAIL = "✔", "✘"
@@ -147,6 +148,9 @@ def main() -> int:
     print("① 数据源与解析")
     files = find_run_files()
     check(len(files) > 0, "发现历史对局存档", f"{len(files)} 个")
+    if not files:
+        # 后面会 files[-1]，没存档直接 IndexError；给明确指引而不是 traceback
+        require_saves()
     ad = HistoryAdapter(g)
     run = ad.parse_file(files[-1])
     check(run.seed != "", "解析出种子", run.seed)

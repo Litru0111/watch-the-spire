@@ -27,6 +27,10 @@ from sts2mon.adapters.history import find_run_files  # noqa: E402
 from sts2mon.glossary import default_glossary  # noqa: E402
 from sts2mon.model import Store  # noqa: E402
 from sts2mon import paths
+from _guard import require_extracted  # noqa: E402
+
+# 称号文案来自 card_effects.json（公开仓库不含，需本地 extract）
+require_extracted("card_effects.json")
 
 G = default_glossary()
 results: list[tuple[bool, str]] = []

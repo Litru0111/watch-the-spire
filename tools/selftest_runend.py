@@ -20,6 +20,7 @@ from sts2mon.events import EventBus, K  # noqa: E402
 from sts2mon.glossary import default_glossary  # noqa: E402
 from sts2mon.live import LiveState  # noqa: E402
 from sts2mon.model import Store  # noqa: E402
+from _guard import require_saves  # noqa: E402
 
 G = default_glossary()
 results: list[tuple[bool, str]] = []
@@ -35,8 +36,8 @@ cands = [f for f in find_run_files() if "profile2" in str(f)]
 if not cands:
     cands = find_run_files()
 if not cands:
-    print("没有可用的 .run 素材，跳过")
-    sys.exit(0)
+    # 不能 exit(0) —— 那会让「没跑任何断言」看起来像「全部通过」（假阳性）。
+    require_saves()
 
 work = Path(tempfile.mkdtemp(prefix="sts2end-"))
 hist = work / "history"

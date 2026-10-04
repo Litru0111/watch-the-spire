@@ -20,6 +20,10 @@ sys.path.insert(0, str(ROOT))
 
 from sts2mon import effects as E  # noqa: E402
 from sts2mon import paths
+from _guard import require_extracted  # noqa: E402
+
+# 升级增量来自 card_values.json（公开仓库不含，需本地 extract）
+require_extracted("card_values.json")
 
 results: list[tuple[bool, str]] = []
 
