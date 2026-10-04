@@ -1,0 +1,65 @@
+# ---- 数据目录：数据库、从游戏提取的文案、截图、回放沙箱全在这里 ----------------
+# 里面含本机 Steam ID 与全部对局历史，绝不入库。
+.sts2mon/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---- 自动生成的提取结果（版权内容，用户本地跑 `sts2mon extract` 重建）---------
+card_effects.json
+card_values.json
+power_names.json
+observed_card_values.json
+
+# ---- 运行产物 ------------------------------------------------------------------
+*.log
+*.err
+*.jsonl
+*.csv
+sts2mon-export*.json
+
+# ---- 浏览器自动化（无头 Edge 的 profile 有上百 MB，含 Cookie）------------------
+edge-profile/
+.edge-*/
+shots/
+*.png
+*.jpg
+!docs/**/*.png
+
+# ---- Python -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- 编辑器 / 系统 -------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 临时文件（调试期生成的中间产物）------------------------------------------
+_n*.js
+_*.js
+.tmp/
+*.tmp
+*.bak

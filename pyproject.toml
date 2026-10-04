@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "watch-the-spire"
+version = "0.1.0"
+description = "《杀戮尖塔 2》非官方数据监控：实时地图与路线、逐场战斗明细、局后总结与全局统计"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["slay-the-spire", "sts2", "monitor", "dashboard", "analytics", "godot"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Games/Entertainment",
+  "Topic :: System :: Monitoring",
+]
+
+# 核心目标：**零第三方依赖**。整个项目只用 Python 标准库
+# （http.server / sqlite3 / dataclasses / struct / re），
+# 连 Web 仪表盘都是单个 HTML 文件，不需要任何前端构建步骤。
+# 所以这里故意留空 —— 有兴趣的可以拿它当约束来审查。
+dependencies = []
+
+[project.optional-dependencies]
+dev = []          # 回归测试与提取工具同样只用标准库
+
+[project.urls]
+# 仓库地址待定 —— 确定后把这两行换成真实 URL 或用 relativize 工具批量替换
+Homepage = "https://github.com/watch-the-spire/watch-the-spire"
+Source = "https://github.com/watch-the-spire/watch-the-spire"
+Issues = "https://github.com/watch-the-spire/watch-the-spire/issues"
+
+[project.scripts]
+watch-the-spire = "sts2mon.cli:main"
+sts2mon = "sts2mon.cli:main"
+
+[tool.setuptools]
+packages = ["sts2mon", "sts2mon.adapters"]
+
+[tool.setuptools.package-data]
+sts2mon = ["assets/*.html"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]

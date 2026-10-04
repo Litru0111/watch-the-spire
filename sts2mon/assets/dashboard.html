@@ -1,0 +1,2086 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>杀戮尖塔2 · 数据监控台</title>
+<script>
+  // 主题要在样式生效前定好，否则会闪一下白/黑
+  (function(){
+    try{
+      var t = localStorage.getItem('sts2mon-theme');
+      if (t) document.documentElement.setAttribute('data-theme', t);
+      else if (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches)
+        document.documentElement.setAttribute('data-theme', 'light');
+    }catch(e){}
+  })();
+</script>
+<style>
+  /* ---- 主题变量层：所有颜色都从这里取，换主题只需换这一组 ---- */
+  :root[data-theme="dark"]{
+    --bg:#0c0f16; --panel:#141a26; --panel2:#1b2333; --line:#26314a;
+    --fg:#e6ecf7; --dim:#8e9cb5; --accent:#5fd3f3; --gold:#f0c674;
+    --red:#ff6b6b; --green:#63e6a1; --purple:#b48ef7; --orange:#ffa94d;
+    --head1:#131a29; --head2:#0f1420; --tabbg:#111725; --tabon:#08121c;
+    --hover:#18203180; --thbg:var(--panel); --rowline:#1e2739;
+    --deep:#0f141f; --inset:#0e1420; --bar:#1d2536; --tagline:#2b3a55;
+    /* 选中/高亮行的底色。必须做成变量：早先写死 #1b2436，
+       亮色主题下就变成「一块黑」（实测踩过）。 */
+    --rowhl:#1b2436; --refbg:#131a26;
+    --tagbg:#1a2233; --tagfg:#93a2bb; --tipbg:rgba(12,15,22,.96);
+    --mine:#5fd08a; --mine2:#7fe3a8; --minebg:rgba(63,185,80,.14);
+    --foe:#ff8b82; --foe2:#ff9a92; --foebg:rgba(248,81,73,.14);
+    --shadow:#0008;
+  }
+  :root[data-theme="light"]{
+    --bg:#eef1f6; --panel:#ffffff; --panel2:#f4f6fa; --line:#d3dae6;
+    --fg:#131a26; --dim:#5d6b82; --accent:#0d7fb8; --gold:#a9711a;
+    --red:#c93a3a; --green:#1c8f57; --purple:#7145c9; --orange:#c26a12;
+    --head1:#ffffff; --head2:#f7f9fc; --tabbg:#eef1f6; --tabon:#ffffff;
+    --hover:#e3eaf4; --thbg:#f7f9fc; --rowline:#e4e9f1;
+    --deep:#f7f9fc; --inset:#f7f9fc; --bar:#dde4ee; --tagline:#c3cdde;
+    --rowhl:#dce7f5; --refbg:#f4f6fa;
+    --tagbg:#f0f3f8; --tagfg:#5d6b82; --tipbg:rgba(255,255,255,.98);
+    --mine:#1c8f57; --mine2:#137a48; --minebg:rgba(28,143,87,.12);
+    --foe:#c93a3a; --foe2:#a82f2f; --foebg:rgba(201,58,58,.12);
+    --shadow:#0002;
+  }
+  *{box-sizing:border-box}
+  /* 固定视口：整页不出现滚动条，滚动只发生在各面板内部 */
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);overflow:hidden;
+       display:flex;flex-direction:column;
+       font:13px/1.55 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+       transition:background .18s,color .18s}
+  a{color:var(--accent)}
+  header{display:flex;align-items:center;gap:14px;padding:9px 12px;flex:0 0 auto;
+         background:linear-gradient(90deg,var(--head1),var(--head2));
+         border-bottom:1px solid var(--line);z-index:20}
+  header h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.4px;white-space:nowrap}
+  header h1 small{color:var(--dim);font-weight:400;margin-left:8px;font-size:11px}
+  /* ---- 主导航：分段式滑块，取代原来的圆角胶囊 ---- */
+  .tabs{display:flex;gap:0;margin-left:auto;position:relative;
+        background:var(--tabbg);border:1px solid var(--line);border-radius:11px;padding:3px}
+  .tabs .slide{position:absolute;top:3px;bottom:3px;border-radius:8px;
+        background:var(--accent);transition:left .24s cubic-bezier(.4,.8,.3,1),
+        width .24s cubic-bezier(.4,.8,.3,1);z-index:0}
+  .tab{position:relative;z-index:1;padding:6px 20px;border:0;border-radius:8px;cursor:pointer;
+       color:var(--dim);background:transparent;user-select:none;font-size:12.5px;
+       font-weight:600;letter-spacing:.3px;transition:color .18s;white-space:nowrap;
+       display:flex;align-items:center;gap:6px}
+  .tab.on{color:var(--tabon)}
+  .tab .ic{font-size:13px;line-height:1}
+  .tab:not(.on):hover{color:var(--fg)}
+  /* ---- 主题切换 ---- */
+  .themes{display:flex;gap:5px;align-items:center}
+  .thbtn{width:26px;height:26px;border-radius:8px;border:1px solid var(--line);cursor:pointer;
+    background:var(--panel2);display:flex;align-items:center;justify-content:center;
+    font-size:12px;transition:transform .15s,border-color .15s;padding:0}
+  .thbtn:hover{transform:translateY(-1px);border-color:var(--accent)}
+  .thbtn.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--line);display:inline-block;
+         flex:0 0 auto}
+  .pulse.on{background:var(--green);box-shadow:0 0 8px var(--green);animation:p 1.4s infinite}
+  @keyframes p{50%{opacity:.35}}
+  /* main 撑满剩余高度，各标签页在内部自己分配 */
+  /* main 撑满剩余高度与整个宽度：不要 max-width 居中留白（没有任何广告要放） */
+  main{flex:1 1 auto;min-height:0;padding:10px 12px;width:100%;overflow:hidden}
+  main > div[id^="tab-"]{height:100%}
+  .grid{display:grid;gap:11px}
+  .cards{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:9px 12px}
+  .card .k{color:var(--dim);font-size:11px;letter-spacing:.5px}
+  .card .v{font-size:21px;font-weight:650;margin-top:2px;font-variant-numeric:tabular-nums}
+  .card .s{color:var(--dim);font-size:11px;margin-top:1px}
+  .grid.two{grid-template-columns:1.35fr 1fr}
+  .grid.three{grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+  .grid.scoregrid{grid-template-columns:200px 1fr}
+  section.panel{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+                padding:11px 13px;margin-top:0;display:flex;flex-direction:column;
+                min-height:0;min-width:0}
+  section.panel > h3{margin:0 0 8px;font-size:12.5px;font-weight:640;display:flex;
+                     align-items:center;gap:8px;flex:0 0 auto}
+  section.panel > h3 span.tag{color:var(--dim);font-weight:400;font-size:11px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  table{table-layout:auto}
+  th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--rowline);
+        overflow:hidden;text-overflow:ellipsis}
+  th{color:var(--dim);font-weight:600;font-size:11px;position:sticky;top:0;
+     background:var(--thbg);z-index:1}
+  tr:hover td{background:var(--hover)}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  /* 面板内滚动：撑满面板剩余高度，整页不再滚动 */
+  .scroll{flex:1 1 auto;min-height:0;overflow:auto}
+  .scroll.tall{max-height:520px}
+  /* 总结面板：分数行与 detail 文本都必须能收缩，否则长文本会把容器撑宽
+     （实测 summaryBody 横向溢出，因为 flex 子项默认 min-width:auto） */
+  #summaryBody > *,#summaryBody .hint{max-width:100%}
+  #summaryBody .hint{overflow-wrap:anywhere}
+  /* 逐层数据表：列多，用固定布局按比例分配，否则「获得」列会被压成竖排单字
+     （实测每列只剩一个字宽）。给获得列留足空间，长名字允许换行。 */
+  #floorTable table{table-layout:fixed}
+  #floorTable table th,#floorTable table td{padding:4px 4px}
+  #floorTable table th{white-space:nowrap;font-size:10.5px}
+  #floorTable table th:nth-child(1),#floorTable table td:nth-child(1){width:30px}
+  #floorTable table th:nth-child(2),#floorTable table td:nth-child(2){width:62px}
+  #floorTable table th:nth-child(3),#floorTable table td:nth-child(3){width:22%}
+  #floorTable table th:nth-child(4),#floorTable table td:nth-child(4){width:38px}
+  #floorTable table th:nth-child(5),#floorTable table td:nth-child(5){width:62px}
+  #floorTable table th:nth-child(6),#floorTable table td:nth-child(6){width:44px}
+  #floorTable table th:nth-child(7),#floorTable table td:nth-child(7){width:56px}
+  /* 第 8 列「获得」自动占满剩余宽度 */
+  #floorTable table td.gainedcell{white-space:normal;overflow-wrap:anywhere;
+    line-height:1.45;font-size:11px}
+  .bar{height:7px;background:var(--bar);border-radius:4px;overflow:hidden;min-width:52px}
+  .bar > i{display:block;height:100%;background:var(--accent)}
+  .bar.red > i{background:var(--red)} .bar.green > i{background:var(--green)}
+  .bar.gold > i{background:var(--gold)} .bar.purple > i{background:var(--purple)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;
+        border:1px solid var(--line);color:var(--dim)}
+  .pill.win{color:#062015;background:var(--green);border-color:var(--green);font-weight:600}
+  .pill.loss{color:#2a0a0a;background:var(--red);border-color:var(--red);font-weight:600}
+  .pill.live{color:#08121c;background:var(--gold);border-color:var(--gold);font-weight:600}
+  .runlist{flex:1 1 auto;min-height:0;overflow:auto}
+  /* 对局列表的过滤条：与自己那套 subtabs 一样的分段控件，但更紧凑 */
+  .runfilter{margin:2px 4px 8px;flex:0 0 auto;align-self:flex-start;justify-self:start}
+  .runfilter .subtab{padding:3px 13px;font-size:11.5px}
+  .runfilter .subtab .n{color:var(--dim);font-size:10.5px;margin-left:4px;
+    font-variant-numeric:tabular-nums}
+  .runfilter .subtab.on .n{color:inherit;opacity:.75}
+  .runrow{padding:8px 10px;border:1px solid transparent;border-radius:9px;cursor:pointer;
+          display:flex;gap:9px;align-items:center}
+  .runrow:hover{background:var(--hover);border-color:var(--line)}
+  .runrow.on{background:var(--panel2);border-color:var(--accent)}
+  .runrow .who{font-weight:620}
+  .runrow .meta{color:var(--dim);font-size:11px}
+  .layout{display:grid;grid-template-columns:300px 1fr;gap:12px;height:100%;min-height:0}
+  .layout > div{min-height:0;display:flex;flex-direction:column;gap:11px}
+  /* 对局详情：头部固定高度（一行摘要），主体左右分栏。
+     关键数字内联在头部，不再占一大块竖直空间。 */
+  .rundetail{display:flex;flex-direction:column;gap:11px;min-height:0;min-width:0}
+  #runHead{flex:0 0 auto}
+  /* 左窄（地图/排行榜）· 右宽（逐层/总结/战斗）。
+     逐层数据有 8 列 + 中文卡名，放窄栏会挤到出现横向滚动条。 */
+  .rundetail-body{flex:1 1 auto;min-height:0;display:grid;
+    grid-template-columns:minmax(260px,1fr) minmax(420px,1.75fr);gap:11px}
+  .rd-col{display:flex;flex-direction:column;gap:11px;min-height:0;min-width:0}
+  /* 一个栏里多个面板时按内容分高度：地图固定上限，逐层吃满剩余 */
+  #mapPanel{flex:0 1 auto;max-height:42%}
+  #floorPanel{flex:2 1 0;min-height:140px}
+  #summaryPanel{flex:3 1 0;min-height:180px}
+  #combatPanel{flex:3 1 0;min-height:140px}
+  /* 只有地图、没有排行榜时让它吃满整栏 */
+  .rd-col:not(:has(.rd-side:not(.hidden))) #mapPanel{flex:1 1 auto;max-height:none}
+  .rd-side{display:flex;flex-direction:column;flex:2 1 0;min-height:140px;min-width:0}
+  .rd-side > .panel{flex:1 1 auto;min-height:0}
+  /* 排行榜：表头可点排序 */
+  #boardBody table th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+  #boardBody table th.sortable:hover{color:var(--fg)}
+  #boardBody table th .dir{color:var(--accent);margin-left:3px;font-size:10px}
+  /* 排行榜列多，压内边距 + 去掉 min-width，避免出现横向滚动条。
+     固定 min-width 会让表格总宽超出容器（实测右栏被截、出现横向滚动条）。 */
+  #boardBody table{table-layout:fixed}
+  #boardBody table th,#boardBody table td{padding:4px 3px}
+  #boardBody table th{white-space:normal;line-height:1.25;font-size:10.5px}
+  #boardBody table td.dimcell .bar{min-width:0}
+  #boardBody table td:nth-child(1){width:24px}
+  #boardBody table td:nth-child(2){width:26%}
+  #boardBody table td:nth-child(2) > div{overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap}
+  #boardBody table td:nth-child(2) > div.dim{font-size:10px}
+  #boardBody .rank{display:inline-flex;align-items:center;justify-content:center;
+    width:18px;height:18px;border-radius:5px;font-size:10.5px;font-weight:700;
+    background:var(--panel2);border:1px solid var(--line);color:var(--dim)}
+  #boardBody .rank.r1{background:var(--gold);border-color:var(--gold);color:#2a1d05}
+  #boardBody .rank.r2{background:#c7d0dd;border-color:#c7d0dd;color:#1b2230}
+  #boardBody .rank.r3{background:#d3a06a;border-color:#d3a06a;color:#2a1a05}
+  #boardBody tr.me td{background:var(--hover);font-weight:600}
+  @media(max-width:1400px){
+    .rundetail-body{grid-template-columns:minmax(220px,1fr) minmax(360px,1.5fr)}
+  }
+  canvas{width:100%;display:block}
+  /* 图表容器：提示框用 DOM 叠加，避免被每秒的重绘擦掉 */
+  .chartbox{position:relative}
+  .charttip{position:absolute;pointer-events:none;z-index:5;
+            background:var(--tipbg);border:1px solid var(--accent);border-radius:7px;
+            padding:6px 9px;font-size:11.5px;line-height:1.6;white-space:nowrap;
+            box-shadow:0 4px 16px var(--shadow)}
+  .charttip b{color:var(--fg);font-weight:600}
+  .charttip .d{color:var(--accent)} .charttip .t{color:var(--red)}
+  #mapwrap{overflow:auto;background:var(--deep);border:1px solid var(--line);
+           border-radius:10px;padding:8px}
+  .nodebox{cursor:pointer}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:6px}
+  .legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:4px}
+  .hpbar{height:20px;border-radius:5px;background:var(--bar);overflow:hidden;position:relative;
+         border:1px solid var(--line)}
+  .hpbar > i{display:block;height:100%;background:linear-gradient(90deg,#3ea66f,#63e6a1)}
+  .hpbar.enemy > i{background:linear-gradient(90deg,#a63e3e,#ff6b6b)}
+  .hpbar span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+              font-size:11px;font-weight:600;text-shadow:0 1px 2px var(--shadow)}
+  .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:9px}
+  .kv > div{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 9px;
+            min-width:0;overflow:hidden}
+  .kv .k{color:var(--dim);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kv .v{font-size:16px;font-weight:640;font-variant-numeric:tabular-nums;
+         white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* 对局头部的一行内联指标：比 .kv 网格省很多竖直空间 */
+  .runmetrics{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:baseline;
+    font-size:12px;line-height:1.5}
+  .runmetrics .m{display:inline-flex;align-items:baseline;gap:5px;white-space:nowrap}
+  .runmetrics .m .k{color:var(--dim);font-size:10.5px}
+  .runmetrics .m b{font-variant-numeric:tabular-nums;font-weight:640}
+  /* 称号行：对局结束后获得，按稀有度上色 */
+  .badgesrow{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:5px;
+    font-size:12px}
+  .badgesrow .k{color:var(--dim);font-size:10.5px;margin-right:2px}
+  .pill.badge{cursor:help;font-weight:600;border-width:1px}
+  /* 列表里的称号：小一号，免得把行撑高 */
+  .runbadges{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
+  .runbadges .pill{padding:0 5px;font-size:9.5px;line-height:15px}
+  .log{font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px;background:var(--deep);
+       border:1px solid var(--line);border-radius:9px;padding:8px;
+       flex:1 1 auto;min-height:0;overflow:auto}
+  .log div{padding:1px 0;border-bottom:1px solid var(--rowline)}
+  .log .t{color:var(--dim);margin-right:7px}
+  /* 回合事件流：左我方 / 右敌方，鲜明的颜色区分 */
+  .rounds{flex:1 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:8px}
+  .round{border:1px solid var(--line);border-radius:9px;overflow:hidden;
+    background:var(--inset);flex:0 0 auto}
+  .round>.rhead{display:flex;align-items:center;gap:8px;padding:4px 9px;
+    background:var(--panel2);border-bottom:1px solid var(--line);font-size:11.5px}
+  .duel{display:grid;grid-template-columns:1fr 52px 1fr;align-items:stretch}
+  .duel>.mine,.duel>.foe{padding:6px 9px;display:flex;flex-direction:column;gap:4px;
+    min-height:32px;justify-content:center}
+  .duel>.mine{background:linear-gradient(90deg,var(--minebg),transparent)}
+  .duel>.foe{background:linear-gradient(270deg,var(--foebg),transparent)}
+  .duel>.vs{display:flex;align-items:center;justify-content:center;font-size:10px;
+    color:var(--dim);border-left:1px dashed var(--line);border-right:1px dashed var(--line)}
+  .act{display:flex;align-items:center;gap:6px;font-size:12px;line-height:1.4}
+  .mine .act{justify-content:flex-start}
+  /* 敌方一栏整体右对齐：让数值贴在中间的分隔线一侧，形成「双方对冲」的观感 */
+  .foe .act{justify-content:flex-start;flex-direction:row-reverse;text-align:right}
+  .act .who{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    max-width:150px}
+  .mine .act .who{color:var(--mine)}
+  .foe .act .who{color:var(--foe)}
+  .act .amt{font-variant-numeric:tabular-nums;font-weight:700;font-size:12.5px}
+  .mine .act .amt{color:var(--mine2)}
+  .foe .act .amt{color:var(--foe2)}
+  .act .tag2{font-size:10px;padding:0 5px;border-radius:5px;white-space:nowrap;
+    background:var(--panel2);border:1px solid var(--line);color:var(--dim)}
+  .empty{font-size:11px;color:var(--dim);font-style:italic}
+  .neutral{display:flex;flex-wrap:wrap;gap:4px;padding:4px 9px 0}
+  .neutral:empty{display:none}
+  .neutral .tag2{font-size:10px;padding:0 5px;border-radius:5px;
+    background:var(--tagbg);border:1px solid var(--tagline);color:var(--tagfg)}
+  .mid-act{font-size:11px;color:var(--tagfg)}
+  .act .n{font-size:10.5px;margin-left:2px}
+  .dim{color:var(--dim)} .red{color:var(--red)} .green{color:var(--green)}
+  .gold{color:var(--gold)} .accent{color:var(--accent)} .purple{color:var(--purple)}
+  .hint{color:var(--dim);font-size:11.5px;line-height:1.7}
+  code{background:var(--deep);border:1px solid var(--line);border-radius:5px;padding:1px 5px;
+       font-family:Consolas,monospace;font-size:11.5px}
+  /* 卡牌/遗物名：悬停显示效果文案 */
+  .effhint{border-bottom:1px dotted var(--line);cursor:help}
+  .effhint:hover{border-bottom-color:var(--gold);color:var(--gold)}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:11px;min-height:0}
+  .split > section{min-height:0}
+  /* ---- 全局统计：概览卡 + 子页导航 + 子页网格，整屏不滚动 ---- */
+  #tab-stats{display:flex;flex-direction:column;gap:11px;min-height:0}
+  #tab-stats > .cards{flex:0 0 auto}
+  #tab-stats > .subtabs{flex:0 0 auto;align-self:flex-start}
+  /* 子页容器吃满剩余高度，再由各自的网格分给面板 */
+  #tab-stats > .subpane{flex:1 1 auto;min-height:0}
+  /* 子页导航：比主导航小一号，靠左 */
+  .subtabs{display:flex;gap:0;position:relative;justify-self:start;
+    background:var(--tabbg);border:1px solid var(--line);border-radius:9px;padding:3px}
+  .subtabs .slide{position:absolute;top:3px;bottom:3px;border-radius:6px;
+    background:var(--panel2);border:1px solid var(--line);
+    transition:left .22s cubic-bezier(.4,.8,.3,1),width .22s cubic-bezier(.4,.8,.3,1);z-index:0}
+  .subtab{position:relative;z-index:1;padding:4px 18px;border:0;border-radius:6px;
+    cursor:pointer;color:var(--dim);background:transparent;font-size:12px;font-weight:600;
+    letter-spacing:.3px;transition:color .18s;font-family:inherit}
+  .subtab.on{color:var(--accent)}
+  .subtab:not(.on):hover{color:var(--fg)}
+  /* 子页内的网格：每页按内容给出行比例。
+     单行子页直接吃满；多列子页按 1:1 分摊，避免出现一大一小两块。 */
+  .subpane{display:grid;gap:11px;min-height:0}
+  #sub-overview{grid-template-columns:repeat(12,1fr);
+    grid-template-rows:minmax(0,1fr)}
+  #sub-overview > .s-char{grid-column:span 4}
+  #sub-overview > .s-asc{grid-column:span 4}
+  #sub-overview > .s-death{grid-column:span 4}
+  #sub-progress{grid-template-columns:repeat(12,1fr);
+    grid-template-rows:minmax(0,1.15fr)}
+  #sub-progress > .s-chart{grid-column:span 7}
+  #sub-progress > .s-enc{grid-column:span 5}
+  #sub-deck{grid-template-columns:repeat(12,1fr);
+    grid-template-rows:minmax(0,1fr)}
+  #sub-deck > .s-card{grid-column:span 6}
+  #sub-deck > .s-pick{grid-column:span 6}
+  /* ---- 实时监控：同样固定网格；隐藏的面板不占位，剩下的自动铺满 ---- */
+  #tab-live{display:grid;grid-template-columns:repeat(12,1fr);
+    grid-template-rows:auto minmax(215px,1fr) minmax(240px,1.3fr);
+    gap:11px;min-height:0;align-content:start}
+  #tab-live > .s-state{grid-column:1/-1}
+  #tab-live > .s-predict{grid-column:span 5}
+  #tab-live > .s-turn{grid-column:span 7}
+  #tab-live > .split{grid-column:1/-1;grid-row:span 1}
+  #tab-live > .s-stale{grid-column:1/-1}
+  @media(max-width:1500px){
+    #tab-live > .s-predict,#tab-live > .s-turn{grid-column:span 6}
+    #sub-progress > .s-chart,#sub-progress > .s-enc{grid-column:span 6}
+  }
+  @media(max-width:1100px){
+    .layout{grid-template-columns:1fr}.grid.two,.split{grid-template-columns:1fr}
+    #tab-stats,#tab-live,#sub-overview,#sub-progress,#sub-deck{
+      grid-template-rows:none;overflow:auto;align-content:stretch}
+    #tab-stats > *,#tab-live > *,#sub-overview > *,#sub-progress > *,#sub-deck > *{
+      grid-column:1/-1 !important}
+    body{overflow:auto}
+  }
+  /* 必须放在样式表最后：
+     `.hidden` 与 `.panel`/`.subpane`/`.split` 这些带 display 的类**特异性相同**，
+     谁在后面谁生效。早先它写在前面，结果 `.subpane{display:grid}` 把它覆盖掉，
+     三个统计子页会同时渲染（被 body 的 overflow:hidden 裁掉，所以不易发现）。
+     :where() 把特异性降到 0，双保险。 */
+  :where(.hidden){display:none !important}
+</style>
+</head>
+<body>
+<header>
+  <h1>🐋 杀戮尖塔2 · 数据监控台 <small id="sub">加载中…</small></h1>
+  <span class="pulse" id="pulse"></span>
+  <span class="dim" id="livetext" style="font-size:11.5px">实时：未连接</span>
+  <div class="themes" id="themes" title="切换主题">
+    <button class="thbtn" data-theme="dark"  title="暗色主题">🌙</button>
+    <button class="thbtn" data-theme="light" title="亮色主题">☀️</button>
+    <button class="thbtn" data-theme="auto"  title="跟随系统">🌗</button>
+  </div>
+  <nav class="tabs" id="tabs">
+    <span class="slide" id="tabSlide"></span>
+    <div class="tab on" data-tab="stats"><span class="ic">📊</span>全局统计</div>
+    <div class="tab" data-tab="runs"><span class="ic">📜</span>对局记录</div>
+    <div class="tab" data-tab="live"><span class="ic">⚡</span>实时监控</div>
+  </nav>
+</header>
+<main>
+  <!-- ============ 全局统计：内部分子页，每页都是固定网格、不滚动 ============ -->
+  <div id="tab-stats">
+    <div class="grid cards" id="ovCards"></div>
+    <!-- 子页导航（第二层） -->
+    <nav class="subtabs" id="statsTabs">
+      <span class="slide" id="statsSlide"></span>
+      <button class="subtab on" data-sub="overview">总览</button>
+      <button class="subtab" data-sub="progress">进程</button>
+      <button class="subtab" data-sub="deck">牌组</button>
+    </nav>
+
+    <!-- 子页 1：总览（谁在打、打到什么难度、被谁终结） -->
+    <div class="subpane" id="sub-overview">
+      <section class="panel s-char"><h3>角色战绩 <span class="tag">胜率 / 场次</span></h3>
+        <div class="scroll" id="charTable"></div></section>
+      <section class="panel s-asc"><h3>进阶难度 <span class="tag">Ascension</span></h3>
+        <div class="scroll" id="ascTable"></div></section>
+      <section class="panel s-death"><h3>死亡热点 <span class="tag">被谁终结</span></h3>
+        <div class="scroll" id="deathTable"></div></section>
+    </div>
+
+    <!-- 子页 2：进程（压力曲线、遭遇战绩） -->
+    <div class="subpane hidden" id="sub-progress">
+      <section class="panel s-chart"><h3>楼层压力曲线 <span class="tag">平均剩余 HP / 平均受伤</span></h3>
+        <div class="chartbox" style="flex:1 1 auto;min-height:0">
+          <canvas id="floorChart"></canvas>
+        </div>
+        <div class="legend"><span><i style="background:var(--green)"></i>平均 HP</span>
+          <span><i style="background:var(--red)"></i>平均受伤</span>
+          <span><i style="background:var(--accent)"></i>样本数</span></div></section>
+      <section class="panel s-enc"><h3>遭遇战绩 <span class="tag">回合 / 受伤 / 死亡率</span></h3>
+        <div class="scroll" id="encTable"></div></section>
+    </div>
+
+    <!-- 子页 3：牌组（卡牌表现、选牌倾向） -->
+    <div class="subpane hidden" id="sub-deck">
+      <section class="panel s-card"><h3>卡牌表现 <span class="tag">跨对局累计</span></h3>
+        <div class="scroll" id="cardTable"></div></section>
+      <section class="panel s-pick"><h3>选牌倾向 <span class="tag">三选一拿走比例</span></h3>
+        <div class="scroll" id="pickTable"></div></section>
+    </div>
+  </div>
+
+  <!-- ============ 对局记录 ============ -->
+  <div id="tab-runs" class="hidden">
+    <div class="layout">
+      <section class="panel" style="padding:10px">
+        <h3 style="padding:2px 4px">对局列表 <span class="tag" id="runCount"></span></h3>
+        <!-- 单人 / 多人分开看：混在一起时多人的那些很难找 -->
+        <nav class="subtabs runfilter" id="runFilter">
+          <span class="slide" id="runFilterSlide"></span>
+          <button class="subtab on" data-mode="all">全部</button>
+          <button class="subtab" data-mode="single">单人</button>
+          <button class="subtab" data-mode="multi">多人</button>
+        </nav>
+        <div class="runlist" id="runList"></div>
+      </section>
+      <div class="rundetail">
+        <section class="panel" id="runHead">
+          <div class="hint">← 左侧选择一场对局，这里会显示地图路线、逐层数据与战斗明细。</div>
+        </section>
+        <!-- 详情主体：左（地图 + 排行榜） · 中（逐层 + 总结 + 战斗） · 右（排行榜） -->
+        <div class="rundetail-body">
+          <div class="rd-col">
+            <section class="panel hidden" id="mapPanel">
+              <h3>地图与路线 <span class="tag" id="mapTag"></span></h3>
+              <div id="mapwrap"></div>
+              <div class="legend">
+                <span><i style="background:var(--orange)"></i>远古</span>
+                <span><i style="background:#7d8ba3"></i>普通战斗</span>
+                <span><i style="background:var(--purple)"></i>精英</span>
+                <span><i style="background:var(--red)"></i>Boss</span>
+                <span><i style="background:var(--gold)"></i>宝箱</span>
+                <span><i style="background:#4b8fd6"></i>商店</span>
+                <span><i style="background:var(--green)"></i>休息处</span>
+                <span><i style="background:#6b7a94"></i>未知</span>
+              </div>
+            </section>
+            <!-- 多人对局排行榜：独立一栏 -->
+            <aside class="rd-side hidden" id="boardPanel">
+              <section class="panel">
+                <h3>玩家排行榜 <span class="tag" id="boardTag"></span></h3>
+                <div class="scroll" id="boardBody"></div>
+              </section>
+            </aside>
+          </div>
+          <div class="rd-col">
+            <!-- 逐层数据列多（8 列 + 中文卡名），放在最宽的主栏里才不挤 -->
+            <section class="panel hidden" id="floorPanel">
+              <h3>逐层数据 <span class="tag">点击某层看战斗明细</span></h3>
+              <div class="scroll" id="floorTable"></div>
+            </section>
+            <section class="panel hidden" id="summaryPanel">
+              <h3>局后总结 <span class="tag" id="summaryTag"></span></h3>
+              <div class="scroll" id="summaryBody"></div>
+              <div id="summaryRefs" class="hidden"></div>
+            </section>
+            <section class="panel hidden" id="combatPanel">
+              <h3 id="combatTitle">战斗明细</h3>
+              <div class="scroll" id="combatBody"></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 实时监控 ============ -->
+  <div id="tab-live" class="hidden">
+    <div class="panel hidden s-stale" id="liveStale"
+         style="margin-top:0;border-color:var(--gold);font-size:12.5px;line-height:1.7"></div>
+    <section class="panel s-state" style="margin-top:0">
+      <h3>实时状态 <span class="tag" id="liveMeta">等待数据…</span></h3>
+      <div id="liveBody"><div class="hint">
+        等待实时数据。请确认：<br>
+        1) 游戏正在运行，且装有 <code>DamageMeter</code> mod（它会把战斗状态写到
+        <code>%APPDATA%\SlayTheSpire2\DamageMeter_combat_state.json</code>）；<br>
+        2) 监控程序正在以 <code>watch</code> 模式运行（默认 0.5 秒轮询一次）；<br>
+        3) 没有真实对局时，可以点下面的按钮回放一场<b>真实历史对局</b>来验证整条链路。
+      </div></div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="tab" id="btnReplay" style="cursor:pointer">▶ 回放真实对局（模拟实时）</button>
+        <span class="dim" id="replayNote" style="font-size:11.5px;align-self:center"></span>
+      </div>
+    </section>
+    <section class="panel hidden s-predict" id="livePredictPanel">
+      <h3>我方数值预测 <span class="tag" id="livePredictTag"></span></h3>
+      <div id="livePredict"></div>
+    </section>
+    <section class="panel hidden s-turn" id="liveTurnPanel">
+      <h3>逐回合变化 <span class="tag" id="liveTurnTag"></span></h3>
+      <div class="chartbox">
+        <canvas id="liveChart" height="170"></canvas>
+        <div class="charttip hidden" id="liveTip"></div>
+      </div>
+      <div class="legend"><span><i style="background:var(--accent)"></i>本回合输出</span>
+        <span><i style="background:var(--red)"></i>本回合受伤</span>
+        <span>鼠标移到柱子上可看具体数值</span></div>
+    </section>
+    <div class="split">
+      <section class="panel hidden" id="liveCardPanel"><h3>卡牌贡献 <span class="tag">本场战斗</span></h3>
+        <div class="scroll" id="liveCards"></div></section>
+      <section class="panel hidden" id="liveEventPanel"><h3>回合事件流
+          <span class="tag">左=我方出手 · 右=敌方出手</span>
+          <span class="tag" id="liveEventTag"></span></h3>
+        <div class="rounds" id="liveLog"></div></section>
+    </div>
+    <div class="split">
+      <section class="panel hidden" id="liveDraftPanel"><h3>卡牌抓取监控 <span class="tag" id="liveDraftTag"></span></h3>
+        <div class="scroll" id="liveDrafts"></div></section>
+      <section class="panel hidden" id="liveChoicePanel"><h3>事件选择监控 <span class="tag" id="liveChoiceTag"></span></h3>
+        <div class="scroll" id="liveChoices"></div></section>
+    </div>
+  </div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const el = (t, c, h) => { const n = document.createElement(t); if(c) n.className = c;
+  if(h !== undefined) n.innerHTML = h; return n; };
+const fmt = n => (n===null||n===undefined) ? '—' : Number(n).toLocaleString('en-US');
+const pct = n => (n===null||n===undefined) ? '—' : n.toFixed(1) + '%';
+const dur = s => {
+  s = Math.round(s || 0);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  return `${m}:${String(sec).padStart(2,'0')}`;
+};
+const durLong = s => {
+  s = Math.round(s || 0);
+  const h = Math.floor(s/3600), m = Math.round((s%3600)/60);
+  return h > 0 ? `${h} 小时 ${m} 分` : `${m} 分钟`;
+};
+const esc = s => String(s??'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+async function api(p){ const r = await fetch(p); return r.json(); }
+
+const NODE_COLOR = {ancient:'#ffa94d', monster:'#7d8ba3', elite:'#b48ef7', boss:'#ff6b6b',
+  treasure:'#f0c674', shop:'#4b8fd6', rest_site:'#63e6a1', unknown:'#6b7a94', event:'#6b7a94'};
+const NODE_ICON = {ancient:'◆', monster:'⚔', elite:'☠', boss:'♛', treasure:'▣',
+  shop:'$', rest_site:'♥', unknown:'?', event:'!'};
+
+/* ---------------- 标签切换 ---------------- */
+// 分段控件的滑块：跟着当前项移动，宽度也随文字长度变化。
+// 主导航和统计页子导航共用这套逻辑，只是选择器不同。
+function slideTo(boxSel, slideSel, itemSel){
+  const box = $(boxSel), slide = $(slideSel);
+  const cur = box && box.querySelector(itemSel);
+  if (!box || !slide || !cur) return;
+  slide.style.left = cur.offsetLeft + 'px';
+  slide.style.width = cur.offsetWidth + 'px';
+}
+function moveSlide(){
+  slideTo('#tabs', '#tabSlide', '.tab.on');
+  slideTo('#statsTabs', '#statsSlide', '.subtab.on');
+}
+function switchTab(name){
+  document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.toggle('on', x.dataset.tab === name));
+  ['stats','runs','live'].forEach(k => $('#tab-' + k).classList.toggle('hidden', k !== name));
+  if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+  moveSlide();
+  if (name === 'live') startLive();
+  else if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  if (name === 'stats') loadStats();
+  if (name === 'runs' && !runsCache.length) loadRuns();
+  // 换页后容器尺寸变了，图表要重新适配。
+  // 必须等两帧：面板刚从 hidden 变可见时，布局还没结算完，clientWidth 仍是 0
+  // （实测 liveChart 会停留在 300×170 的默认尺寸）。
+  requestAnimationFrame(() => requestAnimationFrame(fitCanvases));
+  setTimeout(fitCanvases, 120);
+}
+document.querySelectorAll('.tab[data-tab]').forEach(t => t.onclick = () => switchTab(t.dataset.tab));
+
+/* ---------------- 统计页子页切换 ---------------- */
+// 内容多了之后一屏放不下，所以分成「总览 / 进程 / 牌组」三页；
+// 每页各自是固定网格，仍然不出现整页滚动。
+const STATS_SUBS = ['overview', 'progress', 'deck'];
+function switchSub(name){
+  if (!STATS_SUBS.includes(name)) name = 'overview';
+  document.querySelectorAll('.subtab[data-sub]').forEach(x =>
+    x.classList.toggle('on', x.dataset.sub === name));
+  STATS_SUBS.forEach(k => {
+    const el = $('#sub-' + k);
+    if (el) el.classList.toggle('hidden', k !== name);
+  });
+  // 子页写进 hash 的第二段，刷新后能回到同一页（#stats?sub=deck）
+  const cur = (location.hash.split('?')[1] || '');
+  const q = new URLSearchParams(cur);
+  q.set('sub', name);
+  if (location.hash.startsWith('#stats')) history.replaceState(null, '', '#stats?' + q.toString());
+  moveSlide();
+  requestAnimationFrame(() => requestAnimationFrame(fitCanvases));
+  setTimeout(fitCanvases, 120);
+}
+document.querySelectorAll('.subtab[data-sub]').forEach(b => b.onclick = () => switchSub(b.dataset.sub));
+
+/* ---------------- 主题 ---------------- */
+// 三档：暗色 / 亮色 / 跟随系统。选择记在 localStorage，刷新后保持。
+function applyTheme(t){
+  const root = document.documentElement;
+  if (t === 'auto'){
+    const light = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches;
+    root.setAttribute('data-theme', light ? 'light' : 'dark');
+  } else {
+    root.setAttribute('data-theme', t);
+  }
+  document.querySelectorAll('.thbtn').forEach(b => b.classList.toggle('on', b.dataset.theme === t));
+  try { localStorage.setItem('sts2mon-theme', t); } catch(e) {}
+  setTimeout(fitCanvases, 30);
+}
+(function initTheme(){
+  let t = 'auto';
+  try { t = localStorage.getItem('sts2mon-theme') || 'auto'; } catch(e) {}
+  document.querySelectorAll('.thbtn').forEach(b => b.onclick = () => applyTheme(b.dataset.theme));
+  applyTheme(t);
+  if (window.matchMedia){
+    matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+      let cur = 'auto';
+      try { cur = localStorage.getItem('sts2mon-theme') || 'auto'; } catch(e) {}
+      if (cur === 'auto') applyTheme('auto');
+    });
+  }
+})();
+
+/* ---------------- 画布自适应 ---------------- */
+// 固定布局下画布高度由面板决定，必须按容器实际尺寸重设
+function fitCanvas(cv, minH){
+  if (!cv) return null;
+  const box = cv.parentElement;
+  const w = Math.max(80, box.clientWidth || 0);
+  const h = Math.max(minH || 90, (box.clientHeight || 0) - 2);
+  const dpr = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)){
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+  }
+  cv.style.width = w + 'px';
+  cv.style.height = h + 'px';
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return {ctx, w, h};
+}
+function fitCanvases(){
+  moveSlide();
+  // 重画当前可见页里的图表
+  const st = $('#tab-stats'), lv = $('#tab-live');
+  try {
+    if (st && !st.classList.contains('hidden') && lastStats) drawFloorChart(lastStats);
+    if (lv && !lv.classList.contains('hidden')) drawLiveChart();
+  } catch(e) {}
+}
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(fitCanvases, 120);
+});
+
+/* ---------------- 全局统计 ---------------- */
+async function loadStats(){
+  const d = await api('/api/overview');
+  const o = d.overview;
+  const cards = [
+    ['总对局', fmt(o.runs), `${o.finished} 场已结束 · ${o.live} 场进行中`],
+    ['胜率', pct(o.win_rate), `${o.wins} 胜 / ${o.losses} 负`],
+    ['总楼层', fmt(o.total_floors), `平均 ${o.runs ? (o.total_floors/o.runs).toFixed(1) : 0} 层/场`],
+    ['总战斗', fmt(o.total_combats), `${fmt(o.total_turns)} 个回合`],
+    ['累计输出', fmt(o.total_damage_dealt), `承受 ${fmt(o.total_damage_taken)}`],
+    ['总时长', durLong(o.total_time), `场均 ${durLong(o.avg_run_time)}`],
+  ];
+  $('#ovCards').innerHTML = cards.map(([k,v,s]) =>
+    `<div class="card"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
+
+  const tbl = (rows, head, body) => `<table><thead><tr>${head}</tr></thead><tbody>${rows.map(body).join('')}</tbody></table>`;
+  $('#charTable').innerHTML = tbl(o.by_character,
+    '<th>角色</th><th class="num">场次</th><th class="num">胜</th><th class="num">胜率</th><th class="num">平均层</th>',
+    c => `<tr><td>${esc(c.character)}</td><td class="num">${c.runs}</td><td class="num">${c.wins}</td>
+      <td class="num">${pct(c.win_rate)}</td><td class="num">${c.avg_floors}</td></tr>`);
+
+  $('#ascTable').innerHTML = tbl(o.by_ascension,
+    '<th>进阶</th><th class="num">场次</th><th class="num">胜</th><th class="num">胜率</th>',
+    a => `<tr><td>A${a.ascension}</td><td class="num">${a.runs}</td><td class="num">${a.wins}</td>
+      <td class="num">${pct(a.win_rate)}</td></tr>`);
+
+  const dh = d.death_hotspots;
+  $('#deathTable').innerHTML = (dh.by_encounter.length ? tbl(dh.by_encounter,
+    '<th>遭遇 / 事件</th><th class="num">次数</th>',
+    e => `<tr><td>${esc(e.name)}</td><td class="num">${e.count}</td></tr>`)
+    + '<h3 style="margin-top:12px">按 Act 死亡</h3>' + tbl(dh.by_act,
+      '<th>Act</th><th class="num">次数</th>', a => `<tr><td>第 ${a.act} 层</td><td class="num">${a.count}</td></tr>`)
+    : '<div class="hint">暂无失败记录</div>');
+
+  $('#encTable').innerHTML = tbl(d.encounter_stats,
+    '<th>遭遇</th><th class="num">场次</th><th class="num">回合</th><th class="num">均受伤</th><th class="num">死亡率</th>',
+    e => `<tr><td>${esc(e.name)}</td><td class="num">${e.n}</td><td class="num">${e.avg_turns}</td>
+      <td class="num">${e.avg_taken}</td><td class="num ${e.death_rate>0?'red':''}">${pct(e.death_rate)}</td></tr>`);
+
+  $('#cardTable').innerHTML = tbl(d.card_performance,
+    '<th>卡牌</th><th class="num">打出</th><th class="num">总伤害</th><th class="num">每次伤害</th>',
+    c => `<tr><td>${esc(c.name)}</td><td class="num">${fmt(c.plays)}</td><td class="num">${fmt(c.damage)}</td>
+      <td class="num accent">${c.damage_per_play}</td></tr>`);
+
+  $('#pickTable').innerHTML = tbl(d.card_pick_rate,
+    '<th>卡牌</th><th class="num">出现</th><th class="num">被选</th><th class="num">选择率</th>',
+    c => `<tr><td>${esc(c.name)}</td><td class="num">${c.offered}</td><td class="num">${c.picked}</td>
+      <td class="num"><div style="display:flex;gap:6px;align-items:center"><div class="bar" style="flex:1">
+      <i style="width:${Math.min(100,c.pick_rate)}%"></i></div>${c.pick_rate}%</div></td></tr>`);
+
+  drawFloorChart(d.floor_curve.floors);
+  $('#sub').textContent = `${o.runs} 场对局 · ${d.glossary ? Object.entries(d.glossary).map(([k,v])=>k+v).join(' / ') : ''}`;
+}
+
+function drawFloorChart(rows){
+  lastStats = rows;                       // 供 resize / 换主题后重画
+  const c = $('#floorChart');
+  if (!c) return;
+  // 固定布局下高度由面板决定，用 fitCanvas 按容器实际尺寸设画布
+  const fit = fitCanvas(c, 90);
+  if (!fit) return;
+  const {ctx, w: W, h: H} = fit;
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  ctx.clearRect(0, 0, W, H);
+  const pad = 34, n = rows.length;
+  if(!n) return;
+  const maxHp = Math.max(...rows.map(r => r.avg_hp || 0), 1);
+  const maxDmg = Math.max(...rows.map(r => r.avg_damage_taken || 0), 1);
+  const maxS = Math.max(...rows.map(r => r.samples || 0), 1);
+  const x = i => pad + i * (W - pad*2) / Math.max(n-1,1);
+  // 网格线颜色跟主题走，避免亮色主题下看不清
+  const gridCol = getComputedStyle(document.documentElement)
+    .getPropertyValue('--line').trim() || '#26314a';
+  const dimCol = getComputedStyle(document.documentElement)
+    .getPropertyValue('--dim').trim() || '#8e9cb5';
+  ctx.strokeStyle = gridCol; ctx.lineWidth = 1; ctx.font = `10px sans-serif`;
+  for(let k=0;k<=4;k++){ const y = pad + k*(H-pad*1.6)/4;
+    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad/2,y); ctx.stroke();
+    ctx.fillStyle = dimCol; ctx.fillText(String(Math.round(maxHp*(1-k/4))), 4, y+3); }
+  const line = (get, color, max, alpha) => {
+    ctx.strokeStyle = color; ctx.lineWidth = 2;
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+    ctx.beginPath(); rows.forEach((r,i)=>{ const v = get(r); if(v===null) return;
+      const y = H-pad*0.6 - (v/max)*(H-pad*1.6); i?ctx.lineTo(x(i),y):ctx.moveTo(x(i),y); });
+    ctx.stroke(); ctx.globalAlpha = 1; };
+  line(r => r.samples, getCss('--accent', '#5fd3f3'), maxS, .28);
+  line(r => r.avg_hp, getCss('--green', '#63e6a1'), maxHp);
+  line(r => r.avg_damage_taken, getCss('--red', '#ff6b6b'), maxDmg);
+}
+// 读主题变量的实际颜色（图表用 canvas，拿不到 CSS 变量，必须显式取）
+function getCss(name, fallback){
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+let lastStats = null, lastLive = null;
+
+// 对局结束获得的称号：按稀有度上色，悬停显示达成条件。
+// 数据来自存档 players[].badges，中文名从 pck 提取（含 bronze/silver/gold 三档）。
+const BADGE_COLOR = {
+  bronze: ['#c98a4b', '#2a1a08'],
+  silver: ['#c7d0dd', '#1b2230'],
+  gold:   ['#f0c674', '#2a1d05'],
+};
+function badgePills(list, limit){
+  const arr = (list || []).slice(0, limit || 99);
+  if (!arr.length) return '';
+  return arr.map(b => {
+    const [bg, fg] = BADGE_COLOR[b.rarity] || ['var(--panel2)', 'var(--fg)'];
+    const tip = `${b.name}${b.desc ? '：' + b.desc : ''}`;
+    return `<span class="pill badge" style="background:${bg};border-color:${bg};color:${fg}"
+      title="${esc(tip)}">${esc(b.name)}</span>`;
+  }).join(' ');
+}
+
+// 对局模式的徽标：自定义对局要能和标准局一眼分开，
+// 并列出修正项中文名（如「选牌」）。
+// 注意别回退到原始 ID —— 那会显示成 `自定义 · DRAFT`（实测踩过）。
+// 后端没给中文名时，用前端名称表翻译；再不行才用原始 ID。
+function modeBadge(r){
+  if ((r.game_mode || 'standard') !== 'custom') return '';
+  const ids = r.modifiers || [];
+  const names = (r.modifier_names && r.modifier_names.length)
+    ? r.modifier_names
+    : ids.map(m => labelOf('MODIFIER.' + m) || labelOf(m) || m);
+  const list = names.length ? ` · ${names.map(esc).join(' + ')}` : '';
+  return `<span class="pill gold" style="border-color:var(--gold);color:var(--gold)"
+    title="自定义对局${names.length ? '：' + names.join('、') : ''}">自定义${list}</span>`;
+}
+
+// 是否自定义对局
+function isCustom(r){ return (r.game_mode || 'standard') === 'custom'; }
+
+/* ---------------- 对局列表 ---------------- */
+let runsCache = [], curRun = null, curCombat = null, curPlayerSel = '';
+let runMode = 'all';          // all | single | multi
+// 记录 #runs?seed=XXX 里指定的对局（switchTab 会重写 hash，所以先存下来）
+const wantSeed = new URLSearchParams((location.hash.split('?')[1]) || '').get('seed') || '';
+
+// 多人判定：后端给了 multiplayer 标志，缺省时按玩家数兜底。
+// 注意 player_count 有可能是字符串（实测后端给的是 '3'），必须转数字再比。
+const num = v => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 0; };
+function isMulti(r){ return !!(r.multiplayer || num(r.player_count) > 1); }
+function runsOf(mode){
+  if (mode === 'multi') return runsCache.filter(isMulti);
+  if (mode === 'single') return runsCache.filter(r => !isMulti(r));
+  return runsCache;
+}
+
+// 过滤条：更新计数、高亮与滑块
+function renderRunFilter(){
+  const n = { all: runsCache.length,
+              single: runsCache.filter(r => !isMulti(r)).length,
+              multi: runsCache.filter(isMulti).length };
+  document.querySelectorAll('#runFilter .subtab').forEach(b => {
+    const m = b.dataset.mode;
+    b.classList.toggle('on', m === runMode);
+    // 计数直接写在按钮上，不用点开就知道各有多少场
+    b.innerHTML = ({all:'全部', single:'单人', multi:'多人'})[m] +
+      `<span class="n">${n[m]}</span>`;
+  });
+  slideTo('#runFilter', '#runFilterSlide', '.subtab.on');
+}
+
+// 只负责把当前过滤结果画进列表
+function renderRunList(){
+  const box = $('#runList');
+  if (!box) return;
+  const list = runsOf(runMode);
+  box.innerHTML = '';
+  if (!list.length){
+    box.innerHTML = `<div class="hint" style="padding:14px 10px">${
+      runMode === 'multi' ? '还没有多人对局记录。'
+      : runMode === 'single' ? '还没有单人（含视频存档）以外的对局记录。'
+      : '还没有对局记录。'}</div>`;
+    return;
+  }
+  list.forEach(r => {
+    const tag = r.live ? '<span class="pill live">进行中</span>' :
+      (r.win === true ? '<span class="pill win">胜利</span>' :
+       r.win === false ? '<span class="pill loss">失败</span>' : '<span class="pill">未结束</span>');
+    const row = el('div','runrow', `
+      <div style="flex:1">
+        <div class="who">${esc(r.character||'未知')} ${r.ascension?`<span class="dim">A${r.ascension}</span>`:''}
+          ${isMulti(r)?`<span class="pill gold" style="border-color:var(--gold);color:var(--gold)">多人 ${r.player_count||''}人</span>`:''}
+          ${modeBadge(r)}</div>
+        ${(r.badges||[]).length?`<div class="runbadges">${badgePills(r.badges, 4)}`+
+          ((r.badges||[]).length>4?`<span class="dim">+${r.badges.length-4}</span>`:'')+`</div>`:''}
+        <div class="meta">${r.floors} 层 · ${r.combats} 战 · ${dur(r.run_time)} · ${r.seed||''}</div>
+        <div class="meta">${r.damage_dealt?`输出 ${fmt(r.damage_dealt)} · 受伤 ${fmt(r.damage_taken)}`:'—'}</div>
+      </div>${tag}`);
+    row.dataset.runId = r.run_id;
+    row.dataset.seed = r.seed || '';
+    row.onclick = () => { box.querySelectorAll('.runrow').forEach(x=>x.classList.remove('on'));
+      row.classList.add('on'); showRun(r.run_id); };
+    box.appendChild(row);
+  });
+}
+
+async function loadRuns(){
+  const d = await api('/api/runs');
+  runsCache = d.runs;
+  renderRunFilter();
+  renderRunList();
+  $('#runCount').textContent = `${runsOf(runMode).length} / ${d.runs.length} 场`;
+  // #runs?seed=XXX 可直接定位到某一场（也方便自动化截图）。
+  // 指定了对局就自动切到它所属的那一类，否则列表里可能找不到它。
+  let pick = wantSeed ? d.runs.find(r => r.seed === wantSeed || r.run_id === wantSeed) : null;
+  if (pick){
+    const want = isMulti(pick) ? 'multi' : 'single';
+    if (runMode === 'all') { /* 全部里本来就有，不用切 */ }
+    else if (runMode !== want) switchRunMode(want, { keepSel: true });
+  } else {
+    pick = runsOf(runMode)[0];
+  }
+  if (pick) {
+    const row = $('#runList').querySelector(`.runrow[data-run-id="${pick.run_id}"]`);
+    if (row) row.classList.add('on');
+    showRun(pick.run_id);
+  }
+}
+
+// 切换单人/多人过滤。keepSel=true 时保留当前选中的对局（供 seed 直达用）
+function switchRunMode(mode, opts){
+  if (!['all','single','multi'].includes(mode)) mode = 'all';
+  const prev = (opts && opts.keepSel) ? null : (curRun && curRun.run ? curRun.run.run_id : null);
+  runMode = mode;
+  renderRunFilter();
+  renderRunList();
+  $('#runCount').textContent = `${runsOf(mode).length} / ${runsCache.length} 场`;
+  if (!(opts && opts.keepSel)){
+    // 原先选中的对局可能不在新列表里，那就自动选第一个，别让右侧空着
+    const still = prev && runsOf(mode).some(r => r.run_id === prev);
+    const next = still ? prev : (runsOf(mode)[0] || {}).run_id;
+    if (next){
+      const row = $('#runList').querySelector(`.runrow[data-run-id="${next}"]`);
+      if (row) row.classList.add('on');
+      if (next !== prev) showRun(next);
+    } else {
+      $('#runHead').innerHTML = '<div class="hint">这一类里还没有对局。</div>';
+      ['mapPanel','floorPanel','summaryPanel','combatPanel']
+        .forEach(id => $('#' + id) && $('#' + id).classList.add('hidden'));
+    }
+  }
+}
+document.querySelectorAll('#runFilter .subtab').forEach(b =>
+  b.onclick = () => switchRunMode(b.dataset.mode));
+
+async function showRun(id, playerId){
+  await ensureNames();          // 逐层表要显示中文名，先把名称表准备好
+  const q = '/api/run?id=' + encodeURIComponent(id) +
+            (playerId ? '&player=' + encodeURIComponent(playerId) : '');
+  const d = await api(q);
+  if (d.error) return;
+  curRun = d; curCombat = null; curPlayerSel = d.player_id || '';
+  const r = d.run;
+  const tag = r.win === true ? '<span class="pill win">胜利</span>' :
+    (r.win === false ? '<span class="pill loss">失败</span>' : '<span class="pill">未结束</span>');
+  const picked = (d.players || []).find(p => p.is_local) || (d.players || [])[0] || {};
+  const multi = (d.players || []).length > 1;
+
+  // 多人对局：玩家切换（每人一套战斗/数值/总结）
+  const playerTabs = multi ? `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px">
+      ${(d.players||[]).map(p => `
+        <span class="pill" data-pid="${esc(p.player_id)}"
+          style="cursor:pointer;${p.player_id===d.player_id
+            ? 'background:var(--accent);color:#08121c;border-color:var(--accent);font-weight:600'
+            : ''}">
+          ${esc(p.character_name||p.character||'玩家')}${p.is_local?' ★':''}
+          <span class="dim" style="${p.player_id===d.player_id?'color:#08121c':''}">${esc((p.name||'').slice(0,8)||p.player_id.slice(-4))}</span>
+        </span>`).join('')}
+      <span class="dim" style="align-self:center;font-size:11px">★ = 本机玩家，点击切换视角</span>
+    </div>` : '';
+
+  // 头部压成「标题 + 一行内联数字 + 玩家切换」，
+  // 不再用一大块 .kv 网格堆在顶部挤占竖直空间（那些数字适合横排看）
+  const metrics = [
+    ['楼层', r.floors || 0, ''],
+    ['战斗', r.combats || 0, ''],
+    ['回合', fmt(r.turns), ''],
+    ['输出', fmt(r.damage_dealt), 'green'],
+    ['承受', fmt(r.damage_taken), 'red'],
+    ['用时', dur(r.run_time), ''],
+    ['牌组', r.deck_size || 0, ''],
+    ['遗物', r.relic_count || 0, ''],
+  ];
+  // 对局结束后获得的称号（多人局是每人一套，这里显示当前视角玩家的）
+  const myBadges = (d.summary && (d.summary.badge_list
+    || ((d.summary.per_player || []).find(p => p.player_id === d.player_id) || {}).badge_list))
+    || [];
+  const badgeRow = myBadges.length ? `
+    <div class="badgesrow"><span class="k">称号</span>${badgePills(myBadges)}</div>` : '';
+
+  $('#runHead').innerHTML = `
+    <h3 style="margin-bottom:6px">${esc(picked.character_name || r.character_name || r.character || '对局')} ${tag}
+      <span class="tag">种子 ${esc(r.seed||'?')} · 进阶 A${r.ascension} · ${esc(r.build_id||'')}
+      ${multi ? `· <b style="color:var(--gold)">多人 ${d.players.length} 人</b>` : ''}</span>
+      ${modeBadge(r)}</h3>
+    <div class="runmetrics">
+      ${metrics.map(([k, v, cls]) =>
+        `<span class="m"><span class="k">${k}</span><b class="${cls}">${v}</b></span>`).join('')}
+      ${r.killed_by?`<span class="m"><span class="k">致命</span><b class="red">${esc(r.killed_by)}</b></span>`:''}
+    </div>
+    ${badgeRow}
+    ${playerTabs}`;
+  $('#mapPanel').classList.remove('hidden'); $('#floorPanel').classList.remove('hidden');
+  drawMap(d.acts, d.run.current_floor);
+  drawFloors(d);
+  renderSummary(d.summary);
+  renderLeaderboard(d);
+  // 玩家切换（多人对局）
+  $('#runHead').querySelectorAll('[data-pid]').forEach(el => {
+    el.onclick = () => showRun(d.run.run_id, el.dataset.pid);
+  });
+}
+
+/* ---------------- 多人对局排行榜 ---------------- */
+// 支持按总分/各维度排序，点同一列切换正倒序。
+// 维度是从 per_player[].score.items 动态取的，将来加维度不用改这里。
+let boardSort = { key: 'total', dir: -1 };   // dir: -1 降序（高→低）, 1 升序
+let boardDimCache = '';                      // 维度集合变了就重置排序
+
+function renderLeaderboard(d){
+  const aside = $('#boardPanel'), box = $('#boardBody');
+  if (!aside || !box) return;
+  const people = (d.summary && d.summary.per_player) || d.per_player || [];
+  if (people.length < 2){ aside.classList.add('hidden'); return; }
+  aside.classList.remove('hidden');
+
+  // 维度顺序 = 第一位玩家的 items 顺序（推进深度 / 战斗效率 / …）
+  const dims = ((people[0].score || {}).items || [])
+    .map(i => ({ key: i.key, label: i.label }));
+  const sig = dims.map(x => x.key).join(',');
+  if (sig !== boardDimCache){ boardDimCache = sig; boardSort = { key: 'total', dir: -1 }; }
+
+  const val = (p, key) => {
+    const sc = p.score || {};
+    if (key === 'total') return sc.total || 0;
+    const it = (sc.items || []).find(x => x.key === key);
+    return it ? (it.ratio || 0) : 0;
+  };
+
+  const rows = people.slice().sort((a, b) => {
+    const d0 = val(a, boardSort.key) - val(b, boardSort.key);
+    if (d0 !== 0) return d0 * boardSort.dir;
+    return (b.score || {}).total - (a.score || {}).total || 0;
+  });
+  const rankOf = p => people.slice()
+    .sort((a, b) => (b.score || {}).total - (a.score || {}).total).indexOf(p) + 1;
+
+  const th = (key, label, num = true) => {
+    const on = boardSort.key === key;
+    const dir = on ? (boardSort.dir === -1 ? '▼' : '▲') : '';
+    return `<th class="sortable ${num ? 'num' : ''}" data-sort="${key}"
+      title="点击排序${on ? '（再点切换正倒序）' : ''}">${label}<span class="dir">${dir}</span></th>`;
+  };
+
+  box.innerHTML = `<table><thead><tr>
+      <th style="width:26px">#</th>
+      <th>玩家</th>
+      ${th('total', '总分')}
+      ${dims.map(x => th(x.key, x.label)).join('')}
+    </tr></thead><tbody>
+    ${rows.map(p => {
+      const sc = p.score || {};
+      const rk = rankOf(p);
+      const cls = rk <= 3 ? ' r' + rk : '';
+      const gc = GRADE_COLOR[sc.grade] || 'var(--dim)';
+      return `<tr class="${p.is_local ? 'me' : ''}">
+        <td><span class="rank${cls}">${rk}</span></td>
+        <td>${esc(p.name || p.player_id.slice(-6))}${p.is_local ? ' <span class="gold">★</span>' : ''}
+          <div class="dim" style="font-size:10.5px">${esc(p.character_name || '')}</div></td>
+        <td class="num"><b style="color:${gc}">${sc.total != null ? sc.total : '—'}</b>
+          <span class="dim" style="font-size:10.5px">${esc(sc.grade || '')}</span></td>
+        ${dims.map(x => {
+          const v = val(p, x.key);
+          const full = ((sc.items || []).find(y => y.key === x.key) || {}).full || 0;
+          return `<td class="num dimcell"><b>${v.toFixed(0)}</b>
+            <div class="bar" style="margin-top:2px"><i style="width:${Math.min(100, v)}%;
+              background:${v >= 70 ? 'var(--green)' : v >= 40 ? 'var(--accent)' : 'var(--red)'}"></i></div>
+            <span class="dim" style="font-size:9.5px">/${full}</span></td>`;
+        }).join('')}
+      </tr>`;
+    }).join('')}
+    </tbody></table>
+    <div class="hint" style="margin-top:7px">点表头排序，再点一次切换正／倒序。
+      ★ = 本机玩家（${esc((people.find(p => p.is_local) || {}).name || '—')}）。</div>`;
+
+  $('#boardTag').textContent = `${people.length} 人 · 按${boardSort.key === 'total'
+    ? '总分' : (dims.find(x => x.key === boardSort.key) || {}).label || ''}${boardSort.dir === -1 ? '降序' : '升序'}`;
+
+  box.querySelectorAll('th[data-sort]').forEach(el => {
+    el.onclick = () => {
+      const k = el.dataset.sort;
+      if (boardSort.key === k) boardSort.dir = -boardSort.dir;
+      else boardSort = { key: k, dir: -1 };     // 换列默认降序
+      renderLeaderboard(d);
+    };
+  });
+}
+
+/* ---------------- 名称映射（ID → 中文） ---------------- */
+// 逐层数据里原来直接显示 CARD.LEAF_SLIME_M 这类原始 ID，很难读。
+// 名称表从后端一次拉取后缓存；拉不到就退回「美化 ID」的兜底。
+let nameMap = null;
+async function ensureNames(){
+  if (nameMap) return nameMap;
+  try {
+    const d = await api('/api/glossary');
+    nameMap = d.names || {};
+  } catch (e) { nameMap = {}; }
+  return nameMap;
+}
+function labelOf(raw){
+  const s = String(raw || '');
+  const bare = s.includes('.') ? s.split('.').pop() : s;
+  if (nameMap){
+    if (nameMap[s]) return nameMap[s];
+    if (nameMap[bare]) return nameMap[bare];
+  }
+  // 兜底：LEAF_SLIME_M → Leaf Slime M
+  return bare.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/* ---------------- 局后总结 ---------------- */
+const GRADE_COLOR = {S:'#ffd76e', A:'#63e6a1', B:'#5fd3f3', C:'#b48ef7', D:'#ffa94d', E:'#ff6b6b'};
+
+function renderSummary(s){
+  const panel = $('#summaryPanel');
+  if (!s || !s.score || !s.score.items){ panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  const sc = s.score, st = s.stats;
+  const gc = GRADE_COLOR[sc.grade] || '#8e9cb5';
+  const multi = (s.per_player || []).length > 1;
+  $('#summaryTag').textContent = `${sc.calibration_runs} 场历史作参照 · ${sc.method || ''}` +
+    (multi ? ` · 多人对局（当前视角：${s.character_name || '—'}）` : '');
+
+  // 多人对局：并排展示每位玩家的评分与核心数值，一眼看出谁强谁弱
+  const peerTable = multi ? `
+    <h3 style="font-size:12.5px;margin-top:16px">玩家对比 <span class="tag">每人一套评分</span></h3>
+    <div class="scroll" style="max-height:300px">
+      <table><thead><tr><th>玩家</th><th>角色</th><th class="num">评分</th><th>等级</th>
+        <th class="num">输出</th><th class="num">承受</th><th class="num">出牌/回合</th>
+        <th class="num">抓牌</th><th class="num">遗物</th><th class="num">终局HP</th>
+        <th>称号</th></tr></thead><tbody>
+        ${(s.per_player||[]).map(p => {
+          const ps = p.score, pt = p.stats;
+          const on = p.player_id === s.player_id;
+          return `<tr style="${on?'background:var(--rowhl)':''}">
+            <td>${esc(p.name || p.player_id.slice(-6))}${p.is_local?' <span class="gold">★</span>':''}</td>
+            <td>${esc(p.character_name || '—')}</td>
+            <td class="num"><b style="color:${GRADE_COLOR[ps.grade]||'#fff'}">${ps.total}</b></td>
+            <td><span class="pill" style="border-color:${GRADE_COLOR[ps.grade]||'#26314a'};
+              color:${GRADE_COLOR[ps.grade]||'#8e9cb5'}">${esc(ps.grade)}</span></td>
+            <td class="num accent">${fmt(pt.damage_dealt)}</td>
+            <td class="num red">${fmt(pt.damage_taken)}</td>
+            <td class="num">${pt.turns ? (pt.damage_dealt/pt.turns).toFixed(1) : '—'} / ${pt.turns}</td>
+            <td class="num">${pt.cards_picked}<span class="dim">/${pt.cards_offered}</span></td>
+            <td class="num">${pt.relics}</td>
+            <td class="num ${pt.hp_end===0?'red':''}">${pt.hp_end ?? '—'}<span class="dim">/${pt.max_hp ?? '?'}</span></td>
+            <td style="white-space:normal">${badgePills(p.badge_list) || '<span class="dim">—</span>'}</td>
+          </tr>`; }).join('')}
+      </tbody></table>
+    </div>` : '';
+
+  const bars = sc.items.map(it => `
+    <div style="display:flex;align-items:center;gap:8px;margin:5px 0">
+      <span style="width:64px" class="dim">${esc(it.label)}</span>
+      <div class="bar" style="flex:1;height:9px"><i style="width:${it.ratio}%;background:${
+        it.ratio>=75?'var(--green)':(it.ratio>=50?'var(--accent)':(it.ratio>=30?'var(--gold)':'var(--red)'))}"></i></div>
+      <span style="width:78px;text-align:right;font-variant-numeric:tabular-nums">${it.score}<span class="dim">/${it.full}</span></span>
+      <span style="width:38px;text-align:right" class="dim">${it.ratio}%</span>
+    </div>
+    <div class="hint" style="margin:-2px 0 8px 72px">${esc(it.detail)}</div>`).join('');
+
+  // 参考项（不计分）：目前只有「牌组质量」——通关样本不足时它排序不可靠，
+  // 所以单独用灰色卡片展示，明确标注「仅供参考、不计分」
+  const refCards = (sc.references || []).map(r => `
+    <div style="margin-top:10px;padding:8px 10px;border:1px dashed var(--line);
+                border-radius:8px;background:var(--refbg)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="pill" style="opacity:.8">参考</span>
+        <b style="font-size:12.5px">${esc(r.label)}</b>
+        <span class="dim" style="font-size:11px">不计入总分</span>
+      </div>
+      <div class="hint" style="margin-top:5px">${esc((r.detail||'').replace(/\*\*/g,''))}</div>
+    </div>`).join('');
+  $('#summaryRefs').innerHTML = refCards;
+  $('#summaryRefs').classList.toggle('hidden', !refCards);
+
+  const routeRows = (s.route||[]).map(a => `
+    <div style="margin:8px 0 4px"><span class="pill">Act ${a.act}</span>
+      <span class="dim" style="font-size:11px;margin-left:6px">${a.floors} 层</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px">
+      ${a.nodes.map(n => `<span title="第${n.floor}层 ${esc(n.type_label)}${n.room?' · '+esc(n.room):''}${n.hp!==null&&n.hp!==undefined?' · HP '+n.hp:''}${n.damage_taken?' · 受伤 '+n.damage_taken:''}${n.gained.length?' · 获得 '+esc(n.gained.join('/')):''}"
+        style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:6px;font-size:11px;
+        background:${(NODE_COLOR[n.type]||'#6b7a94')}22;border:1px solid ${(NODE_COLOR[n.type]||'#6b7a94')}66">
+        <b style="color:${NODE_COLOR[n.type]||'#6b7a94'}">${n.floor}</b>
+        <span>${NODE_ICON[n.type]||'·'}</span>
+        <span class="dim">${esc((n.room||n.type_label||'').slice(0,8))}</span>
+        ${n.hp!==null&&n.hp!==undefined?`<span style="color:var(--green)">${n.hp}</span>`:''}
+        ${n.damage_taken?`<span style="color:var(--red)">-${n.damage_taken}</span>`:''}
+      </span>`).join('')}
+    </div>`).join('');
+
+  const draftRows = (s.card_drafts||[]);
+  const picks = draftRows.filter(d => d.picked && d.type !== 'removed');
+  const removes = draftRows.filter(d => d.type === 'removed' || d.kind === 'removed');
+  const transforms = draftRows.filter(d => d.kind === 'transformed');
+  const skipped = draftRows.filter(d => d.type === 'choice' && !d.picked && d.kind !== 'transformed');
+
+  $('#summaryBody').innerHTML = `
+    <div class="two" style="display:grid;grid-template-columns:200px 1fr;gap:18px;align-items:start">
+      <div style="text-align:center;background:var(--panel2);border:1px solid var(--line);
+                  border-radius:12px;padding:14px 10px">
+        <div style="font-size:46px;font-weight:700;line-height:1;color:${gc}">${esc(sc.grade)}</div>
+        <div style="font-size:26px;font-weight:650;margin-top:4px">${sc.total}<span class="dim" style="font-size:13px">/100</span></div>
+        <div class="dim" style="font-size:11px;margin-top:6px">对局评分</div>
+      </div>
+      <div>
+        <div class="hint" style="margin-bottom:8px;font-size:12.5px">${esc(sc.verdict)}</div>
+        ${bars}
+      </div>
+    </div>
+
+    <div class="kv" style="margin-top:14px">
+      <div><div class="k">楼层 / 战斗</div><div class="v">${st.floors} / ${st.combats}</div></div>
+      <div><div class="k">回合</div><div class="v">${fmt(st.turns)}</div></div>
+      <div><div class="k">每回合输出</div><div class="v accent">${st.dpt||'—'}</div></div>
+      <div><div class="k">总承伤</div><div class="v red">${fmt(st.damage_taken)}</div></div>
+      <div><div class="k">HP 起→终</div><div class="v">${st.hp_start??'—'}→${st.hp_end??'—'}</div></div>
+      <div><div class="k">最低 HP</div><div class="v ${st.hp_min===0?'red':''}">${st.hp_min??'—'}</div></div>
+      <div><div class="k">抓牌</div><div class="v">${st.cards_picked}<span class="dim">/${st.cards_offered}</span></div></div>
+      <div><div class="k">最惨一层</div><div class="v gold">${st.roughest_floor??'—'}<span class="dim" style="font-size:12px">${st.roughest_floor_damage?' (-'+st.roughest_floor_damage+')':''}</span></div></div>
+    </div>
+
+    <h3 style="font-size:12.5px;margin-top:16px">数值变化 <span class="tag">HP / 金币 / 每层受伤</span></h3>
+    <div class="chartbox">
+      <canvas id="summaryHpChart" height="150"></canvas>
+      <div class="charttip hidden" id="summaryHpTip"></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--green)"></i>HP</span>
+      <span><i style="background:var(--gold)"></i>金币</span>
+      <span><i style="background:#ff6b6b"></i>本层受伤</span>
+      <span>鼠标移到图上可看每层数值</span></div>
+
+    <h3 style="font-size:12.5px;margin-top:16px">全局路线 <span class="tag">按 Act 展开，悬停看详情</span></h3>
+    ${routeRows || '<div class="hint">无路线数据</div>'}
+    ${peerTable}
+
+    <div class="split" style="margin-top:16px">
+      <div>
+        <h3 style="font-size:12.5px">卡牌抓取 <span class="tag">拿到 ${picks.length} · 跳过 ${skipped.length} · 移除 ${removes.length}${transforms.length?` · 变化 ${transforms.length}`:''}${draftRows.filter(d=>d.kind==='upgraded').length?` · 升级 ${draftRows.filter(d=>d.kind==='upgraded').length}`:''}</span></h3>
+        <div class="scroll" style="max-height:260px">
+          <table><thead><tr><th class="num">层</th><th>结果</th><th>卡牌</th><th>场景</th></tr></thead><tbody>
+          ${draftRows.map(d => {
+            const k = d.kind || (d.type === 'removed' ? 'removed'
+              : (d.type === 'gained' ? 'gained' : (d.picked ? 'picked' : 'skipped')));
+            const tagTxt = k === 'removed' ? '<span class="pill loss">移除</span>'
+              : k === 'transformed' ? '<span class="pill gold">变化</span>'
+              : k === 'upgraded' ? '<span class="pill purple">升级</span>'
+              : k === 'gained' ? '<span class="pill win">获得</span>'
+              : (d.picked ? '<span class="pill win">拿到</span>' : '<span class="pill">跳过</span>');
+            // 升级行显示「卡名+」并在提示里给出升级后的数值
+            let nm = eff(d.name, k === 'upgraded' ? d.effect_base : d.effect, {
+              upgraded: k === 'upgraded', upgradedEffect: d.effect_upgraded });
+            if (k === 'transformed' && d.into_name) nm += ` <span class="gold">→ ${esc(d.into_name)}</span>`;
+            else if (k === 'gained' && d.from_name) nm += ` <span class="dim">(来自 ${esc(d.from_name)})</span>`;
+            return `<tr><td class="num">${d.floor}</td><td>${tagTxt}</td>
+              <td>${nm}</td><td class="dim">${esc(d.room||'')}</td></tr>`;
+          }).join('') || '<tr><td colspan="4" class="dim">无抓牌记录</td></tr>'}
+          </tbody></table>
+        </div>
+      </div>
+      <div>
+        <h3 style="font-size:12.5px">事件与选择 <span class="tag">${(s.event_choices||[]).length} 处</span></h3>
+        <div class="scroll" style="max-height:260px">
+          <table><thead><tr><th class="num">层</th><th>类型</th><th>房间 / 选择</th></tr></thead><tbody>
+          ${(s.event_choices||[]).map(e => {
+            const bits = [...(e.relics||[]).map(x=>`<span class="gold">${esc(x)}</span>`),
+                          ...(e.potions||[]).map(x=>`<span class="purple">${esc(x)}</span>`),
+                          ...(e.events||[]).map(x=>esc(x.name))];
+            return `<tr><td class="num">${e.floor}</td>
+              <td><span class="pill" style="border-color:${NODE_COLOR[e.type]||'#26314a'};color:${NODE_COLOR[e.type]||'#8e9cb5'}">${esc(e.type_label)}</span></td>
+              <td>${esc(e.room||'—')}${bits.length?'<br>'+bits.join(' '):''}</td></tr>`;
+          }).join('') || '<tr><td colspan="3" class="dim">无事件记录</td></tr>'}
+          </tbody></table>
+        </div>
+      </div>
+    </div>`;
+
+  drawSummaryChart(s.hp_curve || []);
+}
+
+let summaryGeo = null;
+let summaryHover = -1;
+
+function drawSummaryChart(curve){
+  const c = $('#summaryHpChart'); if (!c) return;
+  const ctx = c.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = Math.max(c.clientWidth, 200), cssH = 150;
+  const W = c.width = Math.round(cssW * dpr), H = c.height = Math.round(cssH * dpr);
+  ctx.clearRect(0,0,W,H);
+  if (!curve || !curve.length) return;
+
+  const padL = 36*dpr, padR = 14*dpr, padT = 12*dpr, padB = 24*dpr;
+  const plotW = Math.max(W - padL - padR, 10), plotH = Math.max(H - padT - padB, 10);
+  const base = padT + plotH;
+  const n = curve.length;
+  const hpMax = Math.max(1, ...curve.map(p => p.max_hp || p.hp || 0));
+  const goldMax = Math.max(1, ...curve.map(p => p.gold || 0));
+  const dmgMax = Math.max(1, ...curve.map(p => p.damage_taken || 0));
+  const X = i => padL + (n > 1 ? i * plotW / (n - 1) : plotW / 2);
+
+  // 每层受伤：背景柱（只占下方 45% 高度，避免压过 HP 线）
+  const bw = Math.max(2*dpr, plotW / Math.max(n, 1) * 0.5);
+  curve.forEach((p, i) => {
+    if (!p.damage_taken) return;
+    const h = (p.damage_taken / dmgMax) * plotH * 0.45;
+    ctx.fillStyle = '#ff6b6b55';
+    ctx.fillRect(X(i) - bw/2, base - h, bw, h);
+  });
+
+  // 网格与刻度
+  ctx.strokeStyle = '#26314a'; ctx.lineWidth = 1*dpr;
+  ctx.font = `${10*dpr}px sans-serif`;
+  for (let k = 0; k <= 3; k++){
+    const y = padT + plotH*(1 - k/3);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+    ctx.fillStyle = '#8e9cb5';
+    ctx.fillText(String(Math.round(hpMax*k/3)), 4*dpr, y + 3.5*dpr);
+  }
+
+  // 折线：金币（暗）与 HP（亮）；HP 缺失的点跳过，但不断线
+  const polyline = (color, getY, getV) => {
+    ctx.strokeStyle = color; ctx.lineWidth = 2*dpr;
+    ctx.beginPath();
+    let started = false;
+    curve.forEach((p, i) => {
+      const v = getV(p);
+      if (v === null || v === undefined) return;
+      const x = X(i), y = getY(v);
+      if (started) ctx.lineTo(x, y); else { ctx.moveTo(x, y); started = true; }
+    });
+    ctx.stroke();
+  };
+  polyline('#f0c67499', v => padT + plotH * (1 - v/goldMax), p => p.gold ?? null);
+  polyline('#63e6a1', v => padT + plotH * (1 - v/hpMax), p => p.hp ?? null);
+
+  // 楼层号
+  ctx.fillStyle = '#8e9cb5';
+  curve.forEach((p, i) => {
+    if (n <= 20 || i % 2 === 0) ctx.fillText(String(p.floor), X(i) - 4*dpr, base + 14*dpr);
+  });
+
+  summaryGeo = {padL, padR, plotT: padT, plotW, plotH, base, n, X, dpr, curve, W};
+  const tip = $('#summaryHpTip');
+  if (summaryHover >= 0 && tip) drawSummaryTip(summaryHover);
+}
+
+function drawSummaryTip(idx){
+  const c = $('#summaryHpChart'), tip = $('#summaryHpTip');
+  if (!c || !tip || !summaryGeo) return;
+  const p = summaryGeo.curve[idx]; if (!p) return;
+  tip.innerHTML = `<b>第 ${p.floor} 层</b>　${esc(p.type_label || p.type || '')}<br>
+    ${p.room ? esc(p.room) + '<br>' : ''}
+    <span style="color:var(--green)">HP</span> <b>${p.hp ?? '—'}</b>　
+    <span style="color:var(--gold)">金币</span> <b>${p.gold ?? '—'}</b><br>
+    <span style="color:var(--red)">受伤</span> <b>${p.damage_taken || 0}</b>
+    ${p.hp_healed ? `　<span style="color:var(--green)">治疗</span> <b>${p.hp_healed}</b>` : ''}`;
+  tip.classList.remove('hidden');
+  const scale = c.width / Math.max(c.clientWidth, 1);
+  const cx = summaryGeo.X(idx) / scale;
+  const bw = tip.offsetWidth;
+  let left = cx + 14;
+  if (left + bw > c.clientWidth - 4) left = cx - bw - 14;
+  tip.style.left = Math.max(left, 2) + 'px';
+  tip.style.top = '6px';
+}
+
+(function bindSummaryHover(){
+  document.addEventListener('mousemove', ev => {
+    const c = $('#summaryHpChart');
+    if (!c || !summaryGeo || !c.offsetParent) return;   // 面板隐藏时不管
+    const r = c.getBoundingClientRect();
+    if (ev.clientX < r.left || ev.clientX > r.right ||
+        ev.clientY < r.top || ev.clientY > r.bottom) {
+      if (summaryHover !== -1) {
+        summaryHover = -1;
+        const t = $('#summaryHpTip'); if (t) t.classList.add('hidden');
+      }
+      return;
+    }
+    const scale = c.width / Math.max(r.width, 1);
+    const mx = (ev.clientX - r.left) * scale;
+    const {padL, plotW, n} = summaryGeo;
+    let idx = n > 1 ? Math.round((mx - padL) / (plotW / (n - 1))) : 0;
+    idx = Math.max(0, Math.min(n - 1, idx));
+    summaryHover = idx;
+    drawSummaryTip(idx);
+  }, {passive: true});
+})();
+
+function drawMap(acts, curFloor){
+  const wrap = $('#mapwrap'); wrap.innerHTML = '';
+  const all = acts.flatMap(a => a.nodes);
+  if (!all.length) { wrap.innerHTML = '<div class="hint">这场对局没有地图数据</div>'; return; }
+  const hasCoords = all.some(n => n.col !== null && n.col !== undefined);
+  const visited = all.filter(n => n.visited).sort((a,b) => (a.ord||0) - (b.ord||0));
+
+  const CW = hasCoords ? 74 : 220, CH = 44, PAD = 22, R = 15;
+  const maxCol = hasCoords ? Math.max(...all.map(n => n.col || 0)) : 0;
+  const maxRow = hasCoords ? Math.max(...all.map(n => n.row || 0)) : visited.length - 1;
+  const W = PAD*2 + (maxCol+1)*CW, H = PAD*2 + (maxRow+1)*CH;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+  // 地图坐标 y 向上增长，SVG 向下 → 翻转
+  const xi = n => hasCoords ? PAD + (n.col||0)*CW + CW/2 : W/2;
+  const yi = n => PAD + (maxRow - (hasCoords ? (n.row||0) : visited.indexOf(n)))*CH + CH/2;
+  const byId = Object.fromEntries(all.map(n => [n.node_id, n]));
+  const visitedIds = new Set(visited.map(n => n.node_id));
+  const curId = (visited.find(n => Number(n.ord) === Number(curFloor)) || {}).node_id;
+
+  $('#mapTag').textContent = hasCoords
+    ? `${acts.length} 个 Act · ${all.length} 个节点，走过 ${visited.length} 个（含未走的完整地图）`
+    : `${visited.length} 层 · ${acts.length} 个 Act（该对局无地图布局记录，按路线顺序展示）`;
+
+  // 连线：走过的路线加粗高亮
+  all.forEach(n => (n.children||[]).forEach(cid => {
+    const c = byId[cid]; if (!c) return;
+    const onRoute = visitedIds.has(n.node_id) && visitedIds.has(c.node_id) &&
+      Math.abs((n.ord||0) - (c.ord||0)) === 1;
+    const l = document.createElementNS(svg.namespaceURI,'line');
+    l.setAttribute('x1',xi(n)); l.setAttribute('y1',yi(n));
+    l.setAttribute('x2',xi(c)); l.setAttribute('y2',yi(c));
+    l.setAttribute('stroke', onRoute ? '#f0c674' : (n.visited && c.visited ? '#3b4a68' : '#1f2739'));
+    l.setAttribute('stroke-width', onRoute ? 2.6 : 1.4);
+    l.setAttribute('stroke-dasharray', n.visited ? '' : '3 4');
+    svg.appendChild(l);
+  }));
+
+  acts.forEach((a, ai) => {
+    if (ai > 0) {
+      const first = a.nodes.find(n => n.visited) || a.nodes[0];
+      const t = document.createElementNS(svg.namespaceURI,'text');
+      t.setAttribute('x', 6); t.setAttribute('y', yi(first) + 4);
+      t.setAttribute('fill','#4d5b76'); t.setAttribute('font-size','10');
+      t.textContent = 'Act ' + a.act; svg.appendChild(t);
+    }
+    a.nodes.forEach(n => {
+      const isCur = n.node_id === curId;
+      const color = NODE_COLOR[n.point_type] || '#6b7a94';
+      const g = document.createElementNS(svg.namespaceURI,'g');
+      g.setAttribute('class','nodebox');
+      const circle = document.createElementNS(svg.namespaceURI,'circle');
+      circle.setAttribute('cx', xi(n)); circle.setAttribute('cy', yi(n));
+      circle.setAttribute('r', isCur ? R+2 : R);
+      circle.setAttribute('fill', n.visited ? color : color + '33');
+      circle.setAttribute('stroke', isCur ? '#5fd3f3' : (n.visited ? color : color + '88'));
+      circle.setAttribute('stroke-width', isCur ? '3' : (n.visited ? '1.6' : '1'));
+      g.appendChild(circle);
+      const t = document.createElementNS(svg.namespaceURI,'text');
+      t.setAttribute('x', xi(n)); t.setAttribute('y', yi(n)+4);
+      t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','12');
+      t.setAttribute('fill', n.visited ? '#0c0f16' : color);
+      t.textContent = NODE_ICON[n.point_type] || '·'; g.appendChild(t);
+      const title = document.createElementNS(svg.namespaceURI,'title');
+      title.textContent = [
+        n.visited ? `第 ${n.ord} 层` : '未经过',
+        n.type_label || n.point_type,
+        n.room_label || '',
+        n.turns_taken ? n.turns_taken + ' 回合' : '',
+        n.hp_after !== null && n.hp_after !== undefined ? `HP ${n.hp_after}${n.max_hp?'/'+n.max_hp:''}` : '',
+        n.damage_taken ? `受伤 ${n.damage_taken}` : '',
+      ].filter(Boolean).join(' · ');
+      g.appendChild(title);
+      g.onclick = () => n.visited && selectFloor(n.ord);
+      svg.appendChild(g);
+    });
+  });
+  wrap.appendChild(svg);
+}
+
+function drawFloors(d){
+  const rows = d.acts.flatMap(a => a.nodes);
+  $('#floorTable').innerHTML = `<table><thead><tr>
+    <th>层</th><th>类型</th><th>房间 / 遭遇</th><th class="num">回合</th>
+    <th class="num">HP</th><th class="num">受伤</th><th class="num">金币</th><th>获得</th>
+  </tr></thead><tbody>${rows.map(n => {
+    // 用中文名而不是原始 ID（LEAF_SLIME_M 这种），并限制最多 3 项
+    const gained = [...(n.cards_gained||[]).map(c=>`<span class="accent">${esc(labelOf(c))}</span>`),
+                     ...(n.relics_gained||[]).map(c=>`<span class="gold">${esc(labelOf(c))}</span>`)]
+                    .slice(0,3).join(' ');
+    return `<tr data-floor="${n.ord}" style="cursor:pointer">
+      <td>${n.ord}</td>
+      <td><span class="pill" style="border-color:${NODE_COLOR[n.point_type]||'#26314a'};
+        color:${NODE_COLOR[n.point_type]||'#8e9cb5'}">${esc(n.type_label||n.point_type)}</span></td>
+      <td>${esc(n.room_label || '—')}</td>
+      <td class="num">${n.turns_taken||'—'}</td>
+      <td class="num">${n.hp_after!==null&&n.hp_after!==undefined?`${n.hp_after}<span class="dim">/${n.max_hp||'?'}</span>`:'—'}</td>
+      <td class="num ${n.damage_taken?'red':''}">${n.damage_taken||'—'}</td>
+      <td class="num gold">${n.gold!==null&&n.gold!==undefined?fmt(n.gold):'—'}</td>
+      <td class="gainedcell">${gained||'<span class="dim">—</span>'}</td></tr>`; }).join('')}</tbody></table>`;  $('#floorTable').querySelectorAll('tr[data-floor]').forEach(tr =>
+    tr.onclick = () => selectFloor(Number(tr.dataset.floor)));
+}
+
+function selectFloor(ord){
+  const node = curRun.acts.flatMap(a=>a.nodes).find(n => Number(n.ord) === Number(ord));
+  if (!node) return;
+  $('#floorTable').querySelectorAll('tr').forEach(tr =>
+    tr.style.background = Number(tr.dataset.floor) === Number(ord) ? 'var(--rowhl)' : '');
+  const c = node.combat;
+  const p = $('#combatPanel'); p.classList.remove('hidden');
+  $('#combatTitle').innerHTML = `第 ${ord} 层 · ${esc(node.room_label||node.type_label)}
+    <span class="tag">${c?`${c.turns} 回合 · 输出 ${fmt(c.dmg_dealt)} · 受伤 ${fmt(c.dmg_taken)}`:'（无战斗）'}</span>`;
+  if (!c) { $('#combatBody').innerHTML = `<div class="hint">该楼层不是战斗。
+    ${(node.card_choices||[]).length?'<br>记录的选择：'+esc(JSON.stringify(node.card_choices)):''}</div>`; return; }
+  const turns = (c.turn_stats||[]).filter(t => t.side === 'player');
+  const maxD = Math.max(...turns.map(t=>t.damage_dealt||0), 1);
+  const maxT = Math.max(...turns.map(t=>t.damage_taken||0), 1);
+  $('#combatBody').innerHTML = `
+    <div class="kv" style="margin-bottom:11px">
+      <div><div class="k">回合</div><div class="v">${c.turns||0}</div></div>
+      <div><div class="k">输出</div><div class="v green">${fmt(c.dmg_dealt)}</div></div>
+      <div><div class="k">承受</div><div class="v red">${fmt(c.dmg_taken)}</div></div>
+      <div><div class="k">格挡吸收</div><div class="v accent">${fmt(c.blocked)}</div></div>
+      <div><div class="k">最大单击</div><div class="v gold">${fmt(c.max_hit)}</div></div>
+      <div><div class="k">HP</div><div class="v">${c.hp_start??'—'}→${c.hp_end??'—'}</div></div>
+    </div>
+    <div class="split">
+      <div><h3 style="font-size:12px">逐回合</h3><div class="scroll" style="max-height:220px">
+        <table><thead><tr><th class="num">回合</th><th class="num">输出</th><th class="num">受伤</th>
+        <th class="num">格挡</th><th class="num">HP</th></tr></thead><tbody>
+        ${turns.map(t=>`<tr><td class="num">${t.turn}</td>
+          <td class="num"><div style="display:flex;gap:6px;align-items:center;justify-content:flex-end">
+            <div class="bar" style="width:60px"><i style="width:${(t.damage_dealt||0)/maxD*100}%"></i></div>
+            ${fmt(t.damage_dealt)}</div></td>
+          <td class="num"><div style="display:flex;gap:6px;align-items:center;justify-content:flex-end">
+            <div class="bar red" style="width:60px"><i style="width:${(t.damage_taken||0)/maxT*100}%"></i></div>
+            ${fmt(t.damage_taken)}</div></td>
+          <td class="num">${fmt(t.block_gained)}</td><td class="num">${t.hp??'—'}</td></tr>`).join('')}
+        </tbody></table></div></div>
+      <div><h3 style="font-size:12px">卡牌贡献</h3><div class="scroll" style="max-height:220px">
+        <table><thead><tr><th>卡牌</th><th class="num">打出</th><th class="num">伤害</th>
+        <th class="num">格挡</th></tr></thead><tbody>
+        ${(c.card_stats||[]).map(s=>`<tr><td>${esc(s.name||s.card_id)}</td>
+          <td class="num">${s.plays||'—'}</td><td class="num accent">${fmt(s.damage)}</td>
+          <td class="num">${fmt(s.block)}</td></tr>`).join('') || '<tr><td colspan="4" class="dim">存档粒度不含逐卡数据</td></tr>'}
+        </tbody></table></div></div>
+    </div>`;
+}
+
+/* ---------------- 实时监控 ---------------- */
+let liveTimer = null, liveAfterId = 0, liveTurns = [];
+function startLive(){ loadLive(); if (liveTimer) clearInterval(liveTimer);
+  liveTimer = setInterval(loadLive, 1000); }
+document.querySelector('.tab[data-tab="runs"]').addEventListener('click', () => {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } });
+
+async function loadLive(){
+  try{
+    const d = await api('/api/live');
+    // 换了实时对局、或换了战斗（turn 会重置）就清空事件流，
+    // 否则上一场战斗的回合块会和新战斗的同号回合混在一起。
+    // 用「节点」做作用域最可靠：每个战斗一个节点，服务端也按它过滤。
+    const encKey = `${d.run_id}|${d.node_id || d.floor || 0}`;
+    if (encKey !== liveEncKey){
+      liveEncKey = encKey;
+      liveAfterId = 0;
+      liveRounds.clear();
+      const box = $('#liveLog'); if (box) box.innerHTML = '';
+    }    const on = !!d.available;
+    const stale = !!d.stale;
+    $('#pulse').classList.toggle('on', on && !stale);
+    $('#livetext').textContent = !on
+      ? '实时：未连接'
+      : (stale
+          ? `实时：数据已过期（${Math.round(d.stale_seconds||0)} 秒无更新）`
+          : `实时：${d.encounter_name||d.encounter||'—'} · 第 ${d.turn||0} 回合`);
+    const banner = $('#liveStale');
+    if (banner){
+      banner.classList.toggle('hidden', !stale);
+      if (stale) banner.innerHTML = `⚠ 已有 <b>${Math.round(d.stale_seconds||0)}</b> 秒没有收到游戏数据 ——
+        下面显示的是**最后一次收到的状态**（对局 ${esc(d.seed||'—')} · 第 ${d.turn||0} 回合）。<br>
+        常见原因：<b>游戏切到了别的存档</b>、退回主菜单、mod 未加载，或对局已结束但没写出结束事件。
+        继续玩下去会在这里自动跳到新对局。`;
+    }
+    if (!on) return;
+    renderLive(d);
+    if (d.run_id) {
+      // 只拉「当前这场战斗」的事件（服务端按 node_id 过滤），
+      // 从根上杜绝上一场的数据混进来
+      const nodeQ = d.node_id ? `&node=${encodeURIComponent(d.node_id)}` : '';
+      const e = await api(`/api/events?id=${encodeURIComponent(d.run_id)}` +
+                          `&after=${liveAfterId}&limit=60${nodeQ}`);
+      if (e.events && e.events.length){
+        liveAfterId = Math.max(...e.events.map(x => x.id));
+        const log = $('#liveLog');
+        const batch = e.events.slice().reverse();   // 升序：同一回合内先发生的在上
+        let node = null, lastTurn = null;
+        batch.forEach(ev => {
+          const turn = ev.turn ?? 0;
+          if (turn !== lastTurn || !node){
+            lastTurn = turn;
+            node = roundBlock(turn);                // prepend 保持「最新回合在最上」
+            log.prepend(node.wrap);
+            liveRounds.set(turn, node);
+          }
+          addAct(node, ev);
+        });
+        while (log.childNodes.length > 80) log.removeChild(log.lastChild);
+        // Map 也要跟着收敛，否则跨楼层一直累积（诊断计数会虚高）
+        if (liveRounds.size > 40){
+          for (const [t, n] of liveRounds){
+            if (!n.wrap.parentNode) liveRounds.delete(t);
+            if (liveRounds.size <= 30) break;
+          }
+        }
+      }
+    }
+  }catch(err){ /* 服务端重启时忽略 */ }
+}
+
+// ---- 事件流：按回合分组，左=我方出手 / 右=敌方出手 ----
+const liveRounds = new Map();
+let liveRunId = '';
+let liveEncKey = '';
+
+function roundBlock(turn){
+  const wrap = el('div','round');
+  const head = el('div','rhead', `<b>第 ${turn} 回合</b>
+    <span class="dim" id="rsum-${turn}"></span>`);
+  const duel = el('div','duel', `
+    <div class="mine" data-mine><div class="empty">—</div></div>
+    <div class="vs">VS</div>
+    <div class="foe" data-foe><div class="empty">—</div></div>`);
+  const mid = el('div','neutral', '');
+  wrap.appendChild(head); wrap.appendChild(mid); wrap.appendChild(duel);
+  return { wrap, head, mine: duel.querySelector('[data-mine]'),
+           foe: duel.querySelector('[data-foe]'), mid, turn,
+           mySum: 0, foeSum: 0,
+           seen: new Map(), midSeen: new Map() };
+}
+
+// 判断一条事件属于敌方：优先看 side，其次看 detail.actor_kind
+const isFoe = ev => (ev.side === 'enemy') || ((ev.detail||{}).actor_kind === 'enemy');
+const isNeutral = ev => (ev.side === 'neutral') ||
+  ((ev.detail||{}).actor_kind === 'neutral');
+
+function addAct(node, ev){
+  const d = ev.detail || {};
+  const dmg = Number(d.damage ?? ev.value ?? 0) || 0;
+  const actor = (d.actor || '').toString();
+  const isPlay = ev.kind === 'card_play';
+  // 牌名可能落在 name（内存事件）或 label（数据库记录）里。
+  // 注意 detail.actor 对出牌事件可能是字面量 "player"，那不是牌名，要跳过。
+  const rawActor = (actor && actor !== 'player') ? actor : '';
+  const name = isPlay
+    ? (ev.name || rawActor || ev.label || '出牌')
+    : actor;
+
+  // 中立事件（来源不明的状态）：单独一行灰色展示，不塞进任何一栏
+  if (isNeutral(ev)){
+    bump(node, 'mid', esc(ev.label), '', ev.label);
+    return;
+  }
+  const foe = isFoe(ev);
+  const kindTag = ev.kind === 'block' ? '格挡'
+    : (isPlay ? '出牌' : '');
+  const who = isPlay ? name : (rawActor || (foe ? '敌方' : '我方'));
+  // 同一回合内的相同动作合并计数：
+  // events[] 是环形缓冲，旧条目被挤掉后再出现会被判成新增，
+  // 与其隐藏不如如实显示「×N」，也避免一屏全是重复行。
+  const key = `${foe ? 'F' : 'M'}|${kindTag}|${who}|${isPlay ? 0 : dmg}`;
+  bump(node, foe ? 'foe' : 'mine', who, isPlay ? '' : dmg, key, kindTag);
+}
+
+// 把一条动作并入该回合对应栏；相同动作累加计数
+function bump(node, which, who, dmg, key, kindTag){
+  const store = which === 'mid' ? node.midSeen : node.seen;
+  const col = which === 'mid' ? node.mid : (which === 'foe' ? node.foe : node.mine);
+  let rec = store.get(key);
+  if (rec){
+    rec.n++;
+    rec.el.querySelector('.n').textContent = rec.n > 1 ? `×${rec.n}` : '';
+  } else {
+    if (col.querySelector('.empty')) col.innerHTML = '';
+    const el2 = el('div', which === 'mid' ? 'act mid-act' : 'act',
+      (kindTag ? `<span class="tag2">${esc(kindTag)}</span>` : '') +
+      `<span class="who">${esc(who)}</span>` +
+      (dmg ? `<span class="amt">${which === 'foe' ? '−' : '+'}${dmg}</span>` : '') +
+      `<span class="n dim"></span>`);
+    col.appendChild(el2);
+    rec = { n: 1, el: el2 };
+    store.set(key, rec);
+  }
+  if (which !== 'mid' && dmg){
+    if (which === 'foe') node.foeSum += dmg; else node.mySum += dmg;
+  }
+  const rs = $(`#rsum-${node.turn ?? 0}`);
+  if (rs) rs.innerHTML = `<span class="green">我方 +${node.mySum}</span>` +
+    (node.foeSum ? `<span class="red">敌方 −${node.foeSum}</span>` : '');
+}
+
+function renderLive(d){
+  const mode = isCustom(d) ? `自定义 · ${(d.modifier_names||[]).join(' + ')||'—'}` : '标准';
+  $('#liveMeta').innerHTML = `${esc(d.character||'')} · 种子 ${esc(d.seed||'—')} · ` +
+    `<b style="${isCustom(d)?'color:var(--gold)':''}">${esc(mode)}</b> · ` +
+    `${esc(d.encounter_name||d.encounter||'—')}`;
+  const hp = d.hp, max = d.max_hp;
+  const hpPct = (hp!==null&&hp!==undefined&&max) ? hp/max*100 : 0;
+  const enemyHp = d.enemy_hp, enemyMax = d.enemy_max_hp;
+  const ePct = (enemyHp!==null&&enemyHp!==undefined&&enemyMax) ? enemyHp/enemyMax*100 : 0;
+  $('#liveBody').innerHTML = `
+    <div class="split">
+      <div>
+        <div class="dim" style="font-size:11px;margin-bottom:3px">我方 ${esc(d.character_name||d.character||'')}</div>
+        <div class="hpbar"><i style="width:${hpPct}%"></i>
+          <span>${hp??'—'} / ${max??'—'}</span></div>
+        <div class="kv" style="margin-top:9px">
+          <div><div class="k">回合</div><div class="v">${d.turn||0}</div></div>
+          <div><div class="k">累计输出</div><div class="v green">${fmt(d.damage_dealt)}</div></div>
+          <div><div class="k">累计承受</div><div class="v red">${fmt(d.damage_taken)}</div></div>
+          <div><div class="k">每回合输出</div><div class="v accent">${d.dpt??'—'}</div></div>
+          <div><div class="k">格挡吸收</div><div class="v">${fmt(d.blocked)}</div></div>
+          <div><div class="k">出牌</div><div class="v">${fmt(d.cards_played)}</div></div>
+          <div><div class="k">能量消耗</div><div class="v">${fmt(d.energy_spent)}</div></div>
+          <div><div class="k">最大单击</div><div class="v gold">${fmt(d.max_hit)}</div></div>
+        </div>
+      </div>
+      <div>
+        <div class="dim" style="font-size:11px;margin-bottom:3px">敌方 ${esc(d.encounter_name||d.encounter||'')}</div>
+        <div class="hpbar enemy"><i style="width:${ePct}%"></i>
+          <span>${enemyHp??'数据源未提供（mod 仅记录我方）'}</span></div>
+        <div class="hint" style="margin-top:9px">
+          实时数据来自 <code>DamageMeter_combat_state.json</code>：
+          0.5 秒轮询一次，检测到变化就 diff 出事件流写入数据库。<br>
+          ${d.updated_at?`最近更新：${new Date(d.updated_at*1000).toLocaleTimeString()}`:''}
+        </div>
+      </div>
+    </div>`;
+  renderPrediction(d.prediction);
+  const turns = d.dpt_by_turn || {};
+  const taken = d.taken_by_turn || {};
+  liveTurns = Object.entries(turns)
+    .map(([t, v]) => ({turn: +t, dealt: +v || 0, taken: +(taken[t] || 0)}))
+    .filter(t => Number.isFinite(t.turn))
+    .sort((a, b) => a.turn - b.turn);
+  if (liveTurns.length){
+    $('#liveTurnPanel').classList.remove('hidden');
+    $('#liveTurnTag').textContent = `${liveTurns.length} 个回合` +
+      (liveTurns.some(t => t.taken) ? '' : ' · 承伤数据源未提供');
+    drawLiveChart();
+    if (liveHoverIdx >= 0) showLiveTip(liveHoverIdx);
+  } else {
+    hideLiveTip();
+  }
+  const cards = d.cards || [];
+  if (cards.length){ $('#liveCardPanel').classList.remove('hidden');
+    $('#liveCards').innerHTML = `<table><thead><tr><th>卡牌</th><th class="num">打出</th>
+      <th class="num">伤害</th><th class="num">格挡</th></tr></thead><tbody>
+      ${cards.map(c=>`<tr><td>${esc(c.name)}</td><td class="num">${c.plays||'—'}</td>
+        <td class="num accent">${fmt(c.damage)}</td><td class="num">${fmt(c.block)}</td></tr>`).join('')}
+      </tbody></table>`; }
+  if (d.run_id){ $('#liveEventPanel').classList.remove('hidden');
+    $('#liveEventTag').textContent = d.run_id; }
+  renderLiveDrafts(d.card_drafts || []);
+  renderLiveChoices(d.event_choices || []);
+}
+
+/* ---------- 我方数值预测 ---------- */
+function renderPrediction(p){
+  const panel = $('#livePredictPanel'), box = $('#livePredict');
+  if (!panel || !box) return;
+  panel.classList.remove('hidden');
+  if (!p || !p.available){
+    $('#livePredictTag').textContent = '数据不足';
+    box.innerHTML = `<div class="hint">数值预测暂不可用：${esc((p && p.reason) || '本局还没有足够的承伤数据')}</div>`;
+    return;
+  }
+  $('#livePredictTag').textContent = p.hp_authoritative
+    ? `${p.floors_done} 层样本 · HP 实测 · 置信度 ${{high:'高',medium:'中',low:'低'}[p.confidence] || p.confidence}`
+    : `${p.floors_done} 层样本 · HP 不可用 · 仅供参考`;
+  const dying = !!p.will_die;
+  const color = dying ? 'var(--red)' : (p.floors_left !== null && p.floors_left < 6 ? 'var(--gold)' : 'var(--green)');
+  const hpLabel = p.hp_authoritative
+    ? '<span class="green">实测</span>'
+    : (p.estimated_hp ? '<span class="gold">推算值 · 不可靠</span>' : '实测');
+  const hpPct = p.max_hp ? Math.max(p.est_hp / p.max_hp * 100, 0) : 0;
+  const conf = {high:'高', medium:'中', low:'低'}[p.confidence] || p.confidence;
+  const barColor = p.hp_authoritative
+    ? 'linear-gradient(90deg,#3ea66f,#e0b341)'
+    : 'repeating-linear-gradient(45deg,#6b7a94,#6b7a94 6px,#59667d 6px,#59667d 12px)';
+  box.innerHTML = `
+    <div class="split">
+      <div>
+        <div class="dim" style="font-size:11px;margin-bottom:3px">
+          我方 HP（${hpLabel}）</div>
+        <div class="hpbar"><i style="width:${hpPct}%;background:${barColor}"></i>
+          <span>${p.est_hp} / ${p.max_hp}</span></div>
+        <div class="kv" style="margin-top:9px">
+          <div><div class="k">每层承伤</div><div class="v red">${p.taken_per_floor}</div></div>
+          <div><div class="k">每层净损</div><div class="v">${p.net_loss_per_floor}</div></div>
+          <div><div class="k">还能撑</div><div class="v" style="color:${color}">${
+            p.floors_left === null ? '∞' : p.floors_left + ' 层'}</div></div>
+          <div><div class="k">本层段剩余</div><div class="v">${p.floors_in_act_left ?? '—'} 层</div></div>
+        </div>
+      </div>
+      <div>
+        <div class="pill ${dying?'loss':'win'}" style="font-size:12px">
+          ${dying ? '⚠ 预测：会因血量耗尽而结束' : '存活趋势正常'}</div>
+        <div class="hint" style="margin-top:9px">
+          ${esc(p.note||'')}<br>
+          置信度：${conf}（已统计 ${p.floors_done} 层）<br>
+          <span class="${p.hp_authoritative?'dim':'gold'}">${esc(p.source_note||'')}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---------- 实时：卡牌抓取 / 事件选择 ---------- */
+// 卡牌/遗物名称 + 悬停显示效果。
+// 效果文案来自 pck 提取（数值读不到时用 ? 占位）。
+// 升级过的牌要显示成「打击+」，提示里同时给出基础与升级后的效果，
+// 因为升级**不换卡牌 ID**，只有数值变化（打击 6 → 9）。
+function eff(name, effect, opt){
+  const nm = esc(name);
+  const o = opt || {};
+  if (!effect && !o.upgradedEffect) return nm;
+  const lines = [`${name}：${effect || ''}`];
+  if (o.upgradedEffect && o.upgradedEffect !== effect)
+    lines.push(`升级后：${o.upgradedEffect}`);
+  if (o.upgraded) lines.push('（已升级）');
+  return `<span class="effhint" title="${esc(lines.join('\n'))}">${nm}</span>`;
+}
+
+function renderLiveDrafts(list){  const panel = $('#liveDraftPanel');
+  if (!panel) return;
+  if (!list.length){ panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  // 动作类型要分清：拿到 / 跳过 / 变化 / 移除 / 获得
+  // （「变化」不是「跳过」——牌确实离开了牌组，只是换成了另一张）
+  const KIND = {
+    picked:      ['win',  '拿到'],
+    gained:      ['win',  '获得'],
+    neutral:     ['win',  '已拿'],
+    upgraded:    ['purple', '升级'],
+    transformed: ['gold', '变化'],
+    removed:     ['loss', '移除'],
+    skipped:     ['',     '跳过'],
+  };
+  // 按层归组：拿到的牌一行，**没选的合并成一行**（三选一不必占三行）
+  const byFloor = new Map();
+  for (const d of list){
+    const k = d.kind || (d.picked ? 'picked' : 'skipped');
+    if (!byFloor.has(d.floor)) byFloor.set(d.floor, { picked: [], skipped: [], room: d.room });
+    const g = byFloor.get(d.floor);
+    if (k === 'skipped') { g.skipped.push(d.name); (g.skippedItems = g.skippedItems||[]).push(d); }
+    else g.picked.push({ ...d, kind: k });
+    if (!g.room && d.room) g.room = d.room;
+  }
+  const cnt = k => list.filter(d => (d.kind || (d.picked ? 'picked' : 'skipped')) === k).length;
+  // 「获得」里有一部分会在渲染时被合并进「变化」行，这里算实际显示的行数
+  const gainedRows = list.filter(d => d.kind === 'gained' && !d.from).length;
+  $('#liveDraftTag').textContent =
+    `拿到 ${cnt('picked') + cnt('neutral')} · 跳过 ${cnt('skipped')}` +
+    (gainedRows ? ` · 获得 ${gainedRows}` : '') +
+    (cnt('upgraded') ? ` · 升级 ${cnt('upgraded')}` : '') +
+    (cnt('transformed') ? ` · 变化 ${cnt('transformed')}` : '') +
+    (cnt('removed') ? ` · 移除 ${cnt('removed')}` : '');
+  const rows = [];
+  for (const [floor, g] of [...byFloor.entries()].sort((a, b) => a[0] - b[0])){
+    // 同一张牌既是「三选一选中」又是「已获得」时只显示一行；
+    // 「变化」行已经把新牌写在 `→ 新牌` 里了，所以对应的「获得」行也去掉（否则重复）
+    const transformedInto = new Set(g.picked
+      .filter(d => d.kind === 'transformed' && d.into).map(d => d.into));
+    const seenCards = new Set();
+    const picked = g.picked.filter(d => {
+      if (d.kind === 'gained'){
+        if (d.from) return false;                     // 「变化」行已表达
+        if (transformedInto.has(d.card_id)) return false;
+        if (seenCards.has(d.card_id)) return false;    // 与「拿到」重复
+      }
+      seenCards.add(d.card_id);
+      return true;
+    });
+    for (const d of picked){
+      const [cls, txt] = KIND[d.kind] || ['', d.kind];
+      // 升级行的卡名已在后端加了 `+`（早前准备+），提示同时给基础与升级后效果
+      let nm = eff(d.name, d.kind === 'upgraded' ? d.effect_base : d.effect, {
+        upgraded: d.kind === 'upgraded',
+        upgradedEffect: d.effect_upgraded,
+      });
+      if (d.kind === 'transformed' && d.into_name)
+        nm += ` <span class="gold">→ ${eff(d.into_name, d.into_effect)}</span>`;
+      else if (d.kind === 'gained' && d.from_name)
+        nm += ` <span class="dim">(来自 ${eff(d.from_name, d.from_effect)})</span>`;
+      rows.push(`<tr><td class="num">${floor}</td>
+        <td><span class="pill ${cls}">${txt}</span></td>
+        <td>${nm}</td><td class="dim">${esc(d.room||'')}</td></tr>`);
+    }
+    // 没选的合并成一行（每张牌也带效果悬停提示）
+    if (g.skipped.length){
+      const skipped = g.skipped.map((nm, i) => eff(nm, (g.skippedItems||[])[i]?.effect))
+        .join(' <span class="dim">·</span> ');
+      rows.push(`<tr><td class="num">${floor}</td>
+        <td><span class="pill">跳过</span></td>
+        <td class="dim">${skipped}</td>
+        <td class="dim">${esc(g.room||'')}</td></tr>`);
+    }
+  }
+  $('#liveDrafts').innerHTML = `<table><thead><tr><th class="num">层</th><th>结果</th>
+    <th>卡牌</th><th>场景</th></tr></thead><tbody>
+    ${rows.join('') || '<tr><td colspan="4" class="dim">暂无</td></tr>'}
+    </tbody></table>`;
+}
+
+function renderLiveChoices(list){
+  const panel = $('#liveChoicePanel');
+  if (!panel) return;
+  if (!list.length){ panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  $('#liveChoiceTag').textContent = `${list.length} 处`;
+  $('#liveChoices').innerHTML = `<table><thead><tr><th class="num">层</th><th>类型</th>
+    <th>房间 / 获得</th></tr></thead><tbody>
+    ${list.map(e => {
+      const bits = [...(e.relics||[]).map(x=>`<span class="gold">${esc(x)}</span>`),
+                    ...(e.potions||[]).map(x=>`<span class="purple">${esc(x)}</span>`)];
+      // 开场事件（远古/涅奥）：把完整候选项列出来，选中的高亮、没选的留灰
+      const an = e.ancient;
+      const opts = (an && an.options && an.options.length) ? `
+        <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px;align-items:center">
+          <span class="dim" style="font-size:11px">${esc(an.name||'开场')}三选一：</span>
+          ${an.options.map(o => `<span class="pill" style="${o.chosen
+              ? 'border-color:var(--gold);color:var(--gold);font-weight:600'
+              : 'opacity:.55'}">${o.chosen?'✔ ':''}${esc(o.name)}</span>`).join('')}
+        </div>` : '';
+      // 休息处：写明是「升级」还是「休息」，并列出升级了哪张牌
+      const rest = (e.rest_choice && e.rest_choice.length) ? `
+        <div style="margin-top:4px;font-size:11.5px">
+          <span class="pill purple">${e.rest_choice.includes('SMITH') ? '升级' : '休息'}</span>
+          ${(e.upgraded||[]).length ? `<span class="dim" style="margin-left:5px">升级了 ${e.upgraded.map(esc).join('、')}</span>` : ''}
+        </div>` : '';
+      return `<tr><td class="num">${e.floor}</td>
+        <td><span class="pill" style="border-color:${NODE_COLOR[e.type]||'#26314a'};color:${NODE_COLOR[e.type]||'#8e9cb5'}">${esc(e.type_label||e.type)}</span></td>
+        <td>${esc(e.room||'—')}${bits.length?'<br>'+bits.join(' '):''}${rest}${opts}</td></tr>`;
+    }).join('')}
+    </tbody></table>`;
+}
+
+let liveChartGeo = null;   // 命中检测用：{x0, bw, pad, w, h}
+let liveHoverIdx = -1;
+
+function drawLiveChart(){
+  const c = $('#liveChart');
+  if (!c) return;
+  lastLive = liveTurns;                   // 供 resize / 换主题后重画
+  // 高度由面板决定（固定布局），用 fitCanvas 按容器实际尺寸设画布
+  const fit = fitCanvas(c, 90);
+  if (!fit) return;
+  const {ctx, w: W, h: H} = fit;
+  const dpr = window.devicePixelRatio || 1;
+  ctx.clearRect(0, 0, W, H);
+  const n = liveTurns.length;
+  if (!n) { liveChartGeo = null; return; }
+  const devicePixelRatio = 1;             // fitCanvas 已按 dpr 设好变换，坐标用 CSS 像素
+
+  const padL = 34, padR = 14, padT = 16, padB = 26;
+  const plotW = Math.max(W - padL - padR, 10), plotH = Math.max(H - padT - padB, 10);
+  const max = Math.max(1, ...liveTurns.map(t => Math.max(t.dealt, t.taken)));
+  const slot = plotW / n;
+  const bw = Math.max(4*devicePixelRatio, Math.min(slot * 0.36, 26*devicePixelRatio));
+  const x0 = padL + slot / 2;
+
+  // 网格 + y 轴刻度（颜色跟主题走）
+  const lineCol = getCss('--line', '#26314a'), dimCol = getCss('--dim', '#8e9cb5');
+  const accCol = getCss('--accent', '#5fd3f3'), redCol = getCss('--red', '#ff6b6b');
+  const fgCol  = getCss('--fg', '#e6ecf7');
+  ctx.font = `${10*devicePixelRatio}px sans-serif`;
+  ctx.strokeStyle = lineCol; ctx.lineWidth = 1*devicePixelRatio;
+  for (let k = 0; k <= 4; k++){
+    const y = padT + plotH * (1 - k/4);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+    ctx.fillStyle = dimCol;
+    ctx.fillText(String(Math.round(max * k/4)), 4*devicePixelRatio, y + 3.5*devicePixelRatio);
+  }
+  const base = padT + plotH;
+  ctx.beginPath(); ctx.moveTo(padL, base); ctx.lineTo(W - padR, base); ctx.stroke();
+
+  const cx = i => x0 + i * slot;
+  liveTurns.forEach((t, i) => {
+    const h1 = t.dealt / max * plotH, h2 = t.taken / max * plotH;
+    const isHover = i === liveHoverIdx;
+    const gap = 1.5*devicePixelRatio;
+    // 左：本回合输出
+    ctx.fillStyle = isHover ? accCol : accCol;
+    ctx.globalAlpha = isHover ? 1 : .88;
+    ctx.fillRect(cx(i) - bw - gap, base - h1, bw, Math.max(h1, t.dealt > 0 ? 1.5*devicePixelRatio : 0));
+    // 右：本回合受伤（受伤为 0 时不画，避免看起来像有数据）
+    if (t.taken > 0){
+      ctx.fillStyle = redCol;
+      ctx.globalAlpha = isHover ? 1 : .88;
+      ctx.fillRect(cx(i) + gap, base - h2, bw, Math.max(h2, 1.5*devicePixelRatio));
+    }
+    ctx.globalAlpha = 1;
+    // 回合号：密集时隔一个显示
+    if (n <= 24 || i % 2 === 0){
+      ctx.fillStyle = isHover ? fgCol : dimCol;
+      ctx.fillText(String(t.turn), cx(i) - 4*devicePixelRatio, base + 14*devicePixelRatio);
+    }
+  });
+
+  // 悬停提示交给 DOM 叠加层（见 showLiveTip），canvas 只负责画柱子，
+  // 这样每秒刷新重绘时提示框不会被擦掉。
+  liveChartGeo = {padL, padR, slot, x0, W, n, base, plotH, max, cx, dpr: devicePixelRatio};
+  c.style.cursor = liveHoverIdx >= 0 ? 'pointer' : 'default';
+  if (liveHoverIdx >= 0) showLiveTip(liveHoverIdx);
+  else hideLiveTip();
+}
+
+/* ---------------- 图表悬停提示（DOM 叠加层） ---------------- */
+function hideLiveTip(){
+  const tip = $('#liveTip');
+  if (tip) { tip.classList.add('hidden'); tip.innerHTML = ''; }
+}
+
+function showLiveTip(idx){
+  const tip = $('#liveTip'), box = tip && tip.parentElement, c = $('#liveChart');
+  if (!tip || !box || !c || !liveTurns[idx] || !liveChartGeo) return;
+  const geo = liveChartGeo, t = liveTurns[idx];
+  const dpr = geo.dpr || 1;
+  // canvas 内部分辨率 -> CSS 像素
+  const scale = c.width / Math.max(c.clientWidth, 1);
+  const cxCss = (geo.cx(idx)) / scale;
+  tip.innerHTML = `<b>第 ${t.turn} 回合</b><br>
+    <span class="d">输出</span> <b>${t.dealt}</b>　
+    <span class="t">受伤</span> <b>${t.taken}</b>`;
+  tip.classList.remove('hidden');
+  // 先显示再量宽，才能算出正确的左右翻转
+  const bw = tip.offsetWidth, bh = tip.offsetHeight;
+  let left = cxCss + 14;
+  if (left + bw > c.clientWidth - 4) left = cxCss - bw - 14;
+  if (left < 2) left = Math.min(Math.max(cxCss - bw / 2, 2), Math.max(c.clientWidth - bw - 2, 2));
+  const topBar = Math.max(t.dealt, t.taken) / geo.max * (geo.plotH / scale);
+  const baseCss = geo.base / scale;
+  let top = Math.max(baseCss - topBar - bh - 8, 2);
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+}
+
+// 鼠标悬停命中检测（把 canvas 像素坐标换算成数据点）
+(function bindLiveChartHover(){
+  const c = $('#liveChart');
+  const onMove = ev => {
+    if (!liveChartGeo) return;
+    const rect = c.getBoundingClientRect();
+    const scale = c.width / Math.max(rect.width, 1);
+    const mx = (ev.clientX - rect.left) * scale;
+    const {padL, slot, x0, n} = liveChartGeo;
+    let idx = -1;
+    // 命中范围覆盖整列（含柱子左右留白），避免必须精准对准柱子才有反应
+    if (mx >= padL - slot/2 && mx <= x0 + (n - 1) * slot + slot/2){
+      idx = Math.round((mx - x0) / slot);
+      if (idx < 0 || idx >= n) idx = -1;
+    }
+    if (idx !== liveHoverIdx){
+      liveHoverIdx = idx;
+      c.style.cursor = idx >= 0 ? 'pointer' : 'default';
+      if (idx >= 0) showLiveTip(idx); else hideLiveTip();
+    }
+  };
+  c.addEventListener('mousemove', onMove);
+  c.addEventListener('mouseleave', () => {
+    liveHoverIdx = -1;
+    c.style.cursor = 'default';
+    hideLiveTip();
+  });
+  // 页面滚动/缩放后位置会失效，直接收起提示
+  window.addEventListener('scroll', hideLiveTip, {passive: true});
+  window.addEventListener('resize', hideLiveTip);
+})();
+
+/* ---------------- 回放真实对局（模拟实时） ---------------- */
+$('#btnReplay').onclick = async () => {
+  const seed = prompt('输入要回放的对局种子（可用列表里的种子，例如 ' +
+    (runsCache[0]?.seed || 'QUXJJ78BYP') + '）', runsCache[0]?.seed || '');
+  if (!seed) return;
+  const speed = prompt('回放速度倍率（每回合间隔 = 2 秒 / 倍率）', '4') || '4';
+  $('#replayNote').textContent = '正在回放…';
+  const r = await fetch(`/api/replay?seed=${encodeURIComponent(seed)}&speed=${encodeURIComponent(speed)}`,
+    {method:'POST'});
+  const j = await r.json();
+  $('#replayNote').textContent = j.error ? ('回放失败：' + j.error) : `回放中：${j.turns||0} 个回合，约 ${j.eta||'?'} 秒`;
+};
+
+/* ---------------- 启动 ---------------- */
+// 支持 #live / #runs / #runs?seed=XXX / #stats?sub=deck 直达
+// （也方便无头截图与 UI 验收脚本定位）
+const initialTab = (location.hash || '').replace('#', '').split('?')[0];
+if (['stats','runs','live'].includes(initialTab)) {
+  switchTab(initialTab);            // 由 switchTab 负责加载对应页签的数据
+} else {
+  loadStats(); loadRuns();
+}
+// 统计页的子页也要恢复（刷新后不该跳回第一页）
+const initSub = new URLSearchParams((location.hash.split('?')[1]) || '').get('sub') || 'overview';
+switchSub(initSub);
+// 标题下的简介只在统计页加载时才更新，别的页签会一直停在「加载中…」。
+// 这里独立拉一次，任何入口进来都能填上。
+(async () => {
+  try {
+    const d = await api('/api/overview');
+    const o = d.overview;
+    const g = d.glossary || {};
+    $('#sub').textContent = `${o.runs} 场对局` +
+      (Object.keys(g).length ? ' · ' + Object.entries(g).map(([k, v]) => k + v).join(' / ') : '');
+  } catch (e) {}
+})();
+setInterval(() => { if (!$('#tab-stats').classList.contains('hidden')) loadStats(); }, 15000);
+</script>
+</body>
+</html>
