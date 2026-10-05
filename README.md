@@ -35,7 +35,7 @@ cd watch-the-spire
 REM 0) 环境自检 —— 会逐项告诉你数据源/游戏目录是否就绪
 sts2mon.cmd doctor
 
-REM 1) 从游戏文件提取文案与数值（只需一次，约 30 秒）
+REM 1) 从游戏文件提取文案与数值（只需一次，实测约 10 秒）
 sts2mon.cmd extract
 
 REM 2) 导入历史对局

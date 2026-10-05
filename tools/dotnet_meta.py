@@ -163,6 +163,11 @@ class Metadata:
 
     def __init__(self, path: str | Path) -> None:
         self.b = Path(path).read_bytes()
+        # 惰性缓存：列布局与类型表。两者在一次进程内都不变，
+        # 而调用方会反复取（实测 read_row 337 万次、typedefs 数十次），
+        # 不缓存会让提取从几秒变成几分钟。
+        self._plans: dict[str, list[tuple[str, int]]] = {}
+        self._typedefs: list[TypeInfo] | None = None
         self._parse_pe()
         self._parse_tables()
 
@@ -305,25 +310,41 @@ class Metadata:
                 raise ValueError(f"未知列类型 {spec!r}")
         return total
 
+    def _col_plan(self, table: str) -> list[tuple[str, int]]:
+        """表的列布局：[(列名, 字节数)]，**算一次缓存**起来。
+
+        `read_row` 被调用数百万次（一次提取实测 337 万次），而原来每次都要
+        对每列重新 `_split_spec` 解析规格字符串并重算字节宽度 —— 光是这一项
+        就占了提取耗时的大头。列宽只取决于堆尺寸标志（str4/guid4/…），
+        构造后就固定不变，所以缓存是安全的。
+        """
+        plan = self._plans.get(table)
+        if plan is None:
+            plan = []
+            for name, spec in SCHEMA[table]:
+                kind, arg = self._split_spec(spec)
+                if kind == "c":
+                    n = int(arg)
+                elif kind == "s":
+                    n = 4 if self.str4 else 2
+                elif kind == "g":
+                    n = 4 if self.guid4 else 2
+                elif kind == "b":
+                    n = 4 if self.blob4 else 2
+                elif kind in ("t", "cs"):
+                    n = self._idx_size(arg)
+                else:                       # cd
+                    n = self._coded_size(arg)
+                plan.append((name, n))
+            self._plans[table] = plan
+        return plan
+
     def read_row(self, table: str, i: int) -> dict[str, int]:
         """读第 i 行（0 基），返回 {列名: 原始值}。"""
         off = self.table_off[table] + i * self._row_size(table)
         b = self.b
         out: dict[str, int] = {}
-        for name, spec in SCHEMA[table]:
-            kind, arg = self._split_spec(spec)
-            if kind == "c":
-                n = int(arg)
-            elif kind == "s":
-                n = 4 if self.str4 else 2
-            elif kind == "g":
-                n = 4 if self.guid4 else 2
-            elif kind == "b":
-                n = 4 if self.blob4 else 2
-            elif kind in ("t", "cs"):
-                n = self._idx_size(arg)
-            else:                       # cd
-                n = self._coded_size(arg)
+        for name, n in self._col_plan(table):
             out[name] = int.from_bytes(b[off:off + n], "little")
             off += n
         return out
@@ -355,6 +376,19 @@ class Metadata:
         return f"{ns}.{nm}" if ns else nm
 
     def typedefs(self) -> list[TypeInfo]:
+        """所有类型定义（含嵌套关系与基类）。
+
+        **结果缓存**：这个函数要遍历 9410 个 TypeDef 并补齐每类型的字段表，
+        单次约 0.9 秒。调用方（如 `extract_values.var_name`）会在循环里
+        反复调它 —— 实测 50 次调用累计 43 秒，占提取总耗时的绝大部分。
+        类型表在一次进程内不会变，所以缓存是安全的。
+        """
+        if self._typedefs is not None:
+            return self._typedefs
+        self._typedefs = self._build_typedefs()
+        return self._typedefs
+
+    def _build_typedefs(self) -> list[TypeInfo]:
         """所有类型定义（含嵌套关系与基类）。"""
         n = self.row_count("TypeDef")
         raw = [self.read_row("TypeDef", i) for i in range(n)]

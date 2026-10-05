@@ -107,6 +107,10 @@ def cmd_extract(args) -> int:
     公开仓库**不包含**这些提取结果 —— 它们是游戏的本地化文本与编译常量，
     属于游戏版权内容，随仓库分发有法律风险。所以改成本地生成：
     用户装过游戏就能一条命令重建，且不需要任何第三方库。
+
+    实测耗时约 10 秒（pck 文案 3 秒 + dll 数值 5 秒 + 状态名 0.2 秒）。
+    早先要 5 分钟，原因是 `dotnet_meta` 的列布局与类型表没做缓存 ——
+    `read_row` 每次都在重解析列规格、`typedefs()` 每次都在重建 9410 个类型。
     """
     import subprocess
     from pathlib import Path as _P
@@ -209,7 +213,7 @@ def cmd_doctor(args) -> int:
     else:
         missing = [p.name for p in (fx, cv) if not p.is_file()]
         print(f"[!] 提取数据缺失: {', '.join(missing)}")
-        print("    运行 `python -m sts2mon extract` 生成（需要游戏本体，约 30 秒）")
+        print("    运行 `python -m sts2mon extract` 生成（需要游戏本体，实测约 10 秒）")
         print("    —— 不影响采集，但卡牌效果与数值会显示为空白")
 
     # 2. 历史对局
