@@ -25,7 +25,14 @@ print()
 print("② 统计 pck 里「中文且不含假名」的长文本量")
 # 抽出所有像「一整句中文」的片段
 sent = []
-for m in re.finditer(rb'(?:[\u4e00-\u9fff]|[\x20-\x7e]){0,4}(?:[\u4e00-\u9fff]{2,}(?:[^\x00-\x7f]{0,3}[\u4e00-\u9fff]{1,}){1,})', blob):
+# 注意**不能**写成 rb'...\u4e00...'：字节 raw 串不会解码 \uXXXX，
+# 而 re 对**字节模式**里的 \u 转义在 3.12+ 直接报错（实测踩过，
+# 报 `re.error: bad escape \u`）。先让 Python 解成真实字符，再 encode。
+_CN = "[\u4e00-\u9fff]"
+_ASCII = "[\x20-\x7e]"
+_PAT = (f"(?:{_CN}|{_ASCII}){{0,4}}"
+        f"(?:{_CN}{{2,}}(?:[^\x00-\x7f]{{0,3}}{_CN}{{1,}}){{1,}})").encode()
+for m in re.finditer(_PAT, blob):
     s = m.group().decode("utf-8", "ignore")
     if len(s) >= 8 and not KANA.search(s):
         sent.append(s)
