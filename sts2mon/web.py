@@ -192,6 +192,8 @@ class Dashboard:
                     # 却显示成铁甲战士）。players 表里每人的 is_local / character 齐全，
                     # 所以按本机取。
                     meta_by_run: dict[str, dict] = {}
+                    valid_by_run: dict[str, bool] = {}
+                    invalid_by_run: dict[str, str] = {}
                     for r in rows:
                         ps = dash.store.players(str(r["run_id"]))
                         mine = next((p for p in ps if p.get("is_local")), None)
@@ -203,6 +205,33 @@ class Dashboard:
                             "leader": lead_ch,
                             "mine": (mine or {}).get("badges") or [],
                         }
+                        # 有效性：与 RunState.is_valid 同一口径（用 runs 表已有列，
+                        # 不必还原整局，省开销）
+                        rid = str(r["run_id"])
+                        st_t = float(r.get("start_time") or 0)
+                        en_t = float(r.get("end_time") or 0)
+                        rt = int(r.get("run_time") or 0)
+                        if str(r.get("source") or "") in ("replay", "live-aborted"):
+                            valid_by_run[rid] = False
+                            invalid_by_run[rid] = ("回放残留"
+                                                   if str(r.get("source")) == "replay"
+                                                   else "采集被中断")
+                        elif int(r.get("run_time") or 0) == 0 and r.get("win") is None \
+                                and not r.get("live"):
+                            # 截断的实时采集：没有时长、没有结局、也不是进行中
+                            valid_by_run[rid] = False
+                            invalid_by_run[rid] = "采集被中断（无结局）"
+                        elif st_t and en_t and abs((en_t - st_t) - rt) > 5:
+                            # 真实对局的 (end-start) **精确等于** run_time
+                            # （113 场实测偏差全为 0.000）。回放残留偏差 40~49 秒
+                            # —— 回放器压缩了时间轴。容差 5 秒，两边都留余量。
+                            valid_by_run[rid] = False
+                            invalid_by_run[rid] = "时长与起止不符（回放残留）"
+                        elif not (r.get("combats") or 0) and (r.get("floors") or 0) <= 1:
+                            valid_by_run[rid] = False
+                            invalid_by_run[rid] = "空对局（无战斗）"
+                        else:
+                            valid_by_run[rid] = True
 
                     def char_of(r):
                         """对局的角色显示名（**本机优先**）。
@@ -222,6 +251,10 @@ class Dashboard:
 
                     return self._json({"runs": [
                         {"run_id": r["run_id"], "character": char_of(r),
+                         # 是否值得出现在列表里。回放残留与「空对局」判为无效，
+                         # 由界面默认隐藏（见 RunState.is_valid）。
+                         "valid": bool(valid_by_run.get(str(r["run_id"]), True)),
+                         "invalid_reason": invalid_by_run.get(str(r["run_id"]), ""),
                          # 多人局里另外给出队长角色，界面可标注「队长是 X」
                          "leader_character": (meta_by_run.get(str(r["run_id"])) or {}).get("leader", ""),
                          "ascension": r["ascension"], "win": None if r["win"] is None else bool(r["win"]),

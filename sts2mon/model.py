@@ -302,6 +302,50 @@ class RunState:
     def multiplayer(self) -> bool:
         return len(self.players) > 1 or any(n.multiplayer for n in self.floors)
 
+    def is_valid(self) -> bool:
+        """这场对局是否值得出现在列表里。
+
+        **排除两类**（实测都在用户的库中出现过）：
+
+        1. **回放残留**（`source == "replay"`）
+           `sts2mon demo` 会把一场历史对局重放成实时流，结束后把 tracker
+           的状态存了下来。于是库里多出一条 run_id 形如 `live-<seed>`、
+           `start_time` 与 `end_time` 只差**零点几秒**、却写着十几个楼层
+           几十场战斗的记录 —— 它根本不是用户打的。
+
+        2. **空对局**（没有战斗，也没有回合）
+           开局就退（`abandoned=1`）、或回到主菜单时游戏落下的存档。
+           实测有 1 层 0 战 0 回合、时长 11~80 秒的记录。
+
+        3. **时长与起止不符**
+           真实对局的 `end_time - start_time` **精确等于** `run_time`
+           （113/113 场实测偏差全为 0.000），而回放残留偏差 40~49 秒
+           —— 回放器压缩了时间轴。容差取 5 秒，两边都留足余量。
+
+        4. **截断的实时采集**
+           `run_time == 0` 且没有结局（`win is None`）也不是进行中。
+           实时监控启动后被杀掉就会留下这种：实测有「1 层 3 战、
+           结束时间只比开始晚 0.6 秒」的记录 —— 它排在列表最前面（按时间倒序），
+           看起来像一场坏掉的对局。
+           真实存档 113 场里没有一条 `run_time == 0` 或 `win is None`，
+           所以这条规则不误伤。
+
+        **不排除**「1 层但有战斗」的 —— 那是真的在第一层死了，是有效对局。
+        """
+        if str(self.source or "") in ("replay", "live-aborted"):
+            return False
+        if self.start_time and self.end_time:
+            if abs((self.end_time - self.start_time) - self.run_time) > 5:
+                return False
+        # 截断的实时采集：没有时长、没有结局、也不是进行中
+        if self.run_time == 0 and self.win is None and not self.live:
+            return False
+        combats = sum(len(n.combats) for n in self.floors) or 0
+        if combats > 0:
+            return True
+        # 没有战斗：至少要有走过多层，才算真的玩过
+        return len(self.floors) > 1
+
     @property
     def player_ids(self) -> list[str]:
         return [p.player_id for p in self.players]
@@ -1215,6 +1259,43 @@ class Store:
                 self.execute(f"DELETE FROM {table} WHERE run_id=?", (rid,))
             gone.append(rid)
         return gone
+
+    def mark_replay_artifacts(self) -> list[str]:
+        """把「回放残留」标成 `source='replay'`，返回被标的 run_id。
+
+        **为什么不是删掉**：这些行里有完整的战斗/事件数据（只是归属错了），
+        删了不可逆；标上来源既可隐藏、也保留了「它从哪来」的事实。
+
+        判据（在 113 场真实存档上验证过，0 误伤）：
+        `start_time` 与 `end_time` 的差**不等于** `run_time`。
+        真实对局这三者精确相等（`sts2mon demo` 压缩了时间轴，所以不等）。
+        另外 `run_id` 形如 `live-<seed>` 也是佐证 —— 回放器会新建一个 tracker。
+        """
+        fixed: list[str] = []
+        for r in self.all_run_rows():
+            rid = str(r["run_id"])
+            if str(r.get("source") or "") in ("replay", "live-aborted"):
+                continue
+            st_t = float(r.get("start_time") or 0)
+            en_t = float(r.get("end_time") or 0)
+            rt = int(r.get("run_time") or 0)
+            # 截断的实时采集：没有时长、没有结局、也不是进行中
+            if rt == 0 and r.get("win") is None and not r.get("live"):
+                self.execute("UPDATE runs SET source='live-aborted' WHERE run_id=?",
+                             (rid,))
+                fixed.append(rid)
+                continue
+            if not (st_t and en_t):
+                continue
+            if abs((en_t - st_t) - rt) <= 5:
+                continue
+            if not rid.startswith(("live-", "run-")):
+                # 真实存档的 run_id 是裸种子，不会是 live-/run- 前缀；
+                # 前缀 + 时长不符同时成立才判定，避免误伤。
+                continue
+            self.execute("UPDATE runs SET source='replay' WHERE run_id=?", (rid,))
+            fixed.append(rid)
+        return fixed
 
     def all_run_rows(self) -> list[dict[str, Any]]:
         rows = self.query("SELECT * FROM runs ORDER BY COALESCE(start_time,0) DESC")

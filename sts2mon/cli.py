@@ -512,6 +512,13 @@ def _run_watch(ctx: Ctx, args) -> int:
         fixed = ctx.store.backfill_character_names()
         if fixed:
             print(f"   ✎ 修正角色占位符/补名 {fixed} 处")
+        # 回放残留：早期 `demo` 会把回放写回库里，留下「起止只差零点几秒、
+        # 却记着十几层」的假对局。标成 source='replay' 即可从列表隐藏
+        # （不删，数据不可逆）。判据在 113 场真实存档上验证过，0 误伤。
+        reps = ctx.store.mark_replay_artifacts()
+        if reps:
+            print(f"   ⊘ 标记回放残留 {len(reps)} 条（不再出现在对局列表）: "
+                  + ", ".join(reps[:4]) + (" …" if len(reps) > 4 else ""))
     except Exception as exc:
         print(f"   [!] 对局去重失败: {exc!r}")
 
@@ -749,10 +756,14 @@ def cmd_demo(args) -> int:
     except KeyboardInterrupt:
         print("\n   中断回放")
     finally:
-        ctx.store.save_run(ctx.live.tracker.run)
-        bus_events = [r for c in ctx.live.tracker.run.combats for r in c.events]
-        ctx.store.add_events(ctx.live.tracker.run.run_id, bus_events)
-        print(f"\n   已保存实时事件 {len(bus_events)} 条到数据库")
+        # **不再把回放写进正式库**。
+        # 回放会在 tracker 里新建一个 run_id 形如 `live-<seed>` 的对局，
+        # 早期这里 save_run 它，于是库里多出一条「耗时零点几秒、却有十几层
+        # 几十场战斗」的假记录，混在用户的对局列表里（实测踩过）。
+        # 回放数据本来就是从库里读出来的，没必要写回去。
+        run = ctx.live.tracker.run
+        n_ev = sum(len(c.events) for c in run.combats)
+        print(f"\n   回放结束（不写入数据库；本次产生 {n_ev} 条内存事件）")
     if args.hold:
         print("\n   仪表盘仍在运行，按 Ctrl+C 退出…")
         try:

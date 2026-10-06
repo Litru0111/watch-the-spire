@@ -418,6 +418,14 @@
     <div class="layout">
       <section class="panel" style="padding:10px">
         <h3 style="padding:2px 4px">对局列表 <span class="tag" id="runCount"></span></h3>
+        <!-- 两个维度：先挑有效性（默认只看有效对局），再按人数分。
+             库里可能混着回放残留与「开局就退」的空对局，
+             它们仍可查看，但不该占着默认列表。 -->
+        <nav class="subtabs runfilter" id="runQuality">
+          <span class="slide" id="runQualitySlide"></span>
+          <button class="subtab on" data-quality="valid">有效对局</button>
+          <button class="subtab" data-quality="all">含无效</button>
+        </nav>
         <!-- 单人 / 多人分开看：混在一起时多人的那些很难找 -->
         <nav class="subtabs runfilter" id="runFilter">
           <span class="slide" id="runFilterSlide"></span>
@@ -799,7 +807,10 @@ function isCustom(r){ return (r.game_mode || 'standard') === 'custom'; }
 
 /* ---------------- 对局列表 ---------------- */
 let runsCache = [], curRun = null, curCombat = null, curPlayerSel = '';
-let runMode = 'all';          // all | single | multi
+let runMode = 'all';          // all | single | multi   （人数维度）
+let runQuality = 'valid';     // valid | all            （有效性维度）
+// 默认只看**有效对局**：库里可能混着回放残留与「开局就退」的空对局
+// （见后端 /api/runs 的 valid / invalid_reason 字段）。
 // 记录 #runs?seed=XXX 里指定的对局（switchTab 会重写 hash，所以先存下来）
 const wantSeed = new URLSearchParams((location.hash.split('?')[1]) || '').get('seed') || '';
 
@@ -807,17 +818,33 @@ const wantSeed = new URLSearchParams((location.hash.split('?')[1]) || '').get('s
 // 注意 player_count 有可能是字符串（实测后端给的是 '3'），必须转数字再比。
 const num = v => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 0; };
 function isMulti(r){ return !!(r.multiplayer || num(r.player_count) > 1); }
+function byQuality(list){
+  // 老数据（或后端没给 valid）一律当有效，避免升级后列表突然空了
+  return runQuality === 'valid' ? list.filter(r => r.valid !== false) : list;
+}
 function runsOf(mode){
-  if (mode === 'multi') return runsCache.filter(isMulti);
-  if (mode === 'single') return runsCache.filter(r => !isMulti(r));
-  return runsCache;
+  const base = byQuality(runsCache);
+  if (mode === 'multi') return base.filter(isMulti);
+  if (mode === 'single') return base.filter(r => !isMulti(r));
+  return base;
 }
 
-// 过滤条：更新计数、高亮与滑块
+// 过滤条：更新计数、高亮与滑块（两个维度：有效性 × 人数）
 function renderRunFilter(){
-  const n = { all: runsCache.length,
-              single: runsCache.filter(r => !isMulti(r)).length,
-              multi: runsCache.filter(isMulti).length };
+  const valid = runsCache.filter(r => r.valid !== false);
+  const nq = { valid: valid.length, all: runsCache.length };
+  document.querySelectorAll('#runQuality .subtab').forEach(b => {
+    const q = b.dataset.quality;
+    b.classList.toggle('on', q === runQuality);
+    b.innerHTML = ({valid:'有效对局', all:'含无效'})[q] +
+      `<span class="n">${nq[q]}</span>`;
+  });
+  slideTo('#runQuality', '#runQualitySlide', '#runQuality .subtab.on');
+
+  const base = byQuality(runsCache);
+  const n = { all: base.length,
+              single: base.filter(r => !isMulti(r)).length,
+              multi: base.filter(isMulti).length };
   document.querySelectorAll('#runFilter .subtab').forEach(b => {
     const m = b.dataset.mode;
     b.classList.toggle('on', m === runMode);
@@ -826,6 +853,16 @@ function renderRunFilter(){
       `<span class="n">${n[m]}</span>`;
   });
   slideTo('#runFilter', '#runFilterSlide', '.subtab.on');
+}
+
+function switchRunQuality(q){
+  if (!['valid','all'].includes(q)) q = 'valid';
+  runQuality = q;
+  renderRunFilter();
+  renderRunList();
+  $('#runCount').textContent = `${runsOf(runMode).length} / ${runsCache.length} 场`;
+  const first = runsOf(runMode)[0];
+  if (first) showRun(first.run_id);
 }
 
 // 只负责把当前过滤结果画进列表
@@ -911,6 +948,8 @@ function switchRunMode(mode, opts){
     }
   }
 }
+document.querySelectorAll('#runQuality .subtab').forEach(b =>
+  b.onclick = () => switchRunQuality(b.dataset.quality));
 document.querySelectorAll('#runFilter .subtab').forEach(b =>
   b.onclick = () => switchRunMode(b.dataset.mode));
 
