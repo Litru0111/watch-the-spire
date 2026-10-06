@@ -34,10 +34,9 @@ dependencies = []
 dev = []          # 回归测试与提取工具同样只用标准库
 
 [project.urls]
-# 仓库地址待定 —— 确定后把这两行换成真实 URL 或用 relativize 工具批量替换
-Homepage = "https://github.com/watch-the-spire/watch-the-spire"
-Source = "https://github.com/watch-the-spire/watch-the-spire"
-Issues = "https://github.com/watch-the-spire/watch-the-spire/issues"
+Homepage = "https://github.com/Litru0111/watch-the-spire"
+Source = "https://github.com/Litru0111/watch-the-spire"
+Issues = "https://github.com/Litru0111/watch-the-spire/issues"
 
 [project.scripts]
 watch-the-spire = "sts2mon.cli:main"
