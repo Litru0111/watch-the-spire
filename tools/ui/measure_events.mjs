@@ -3,9 +3,9 @@ import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 // 浏览器路径自动探测（可用 CHROME_PATH 覆盖）
-import { browserPath } from './_common.mjs';
+import { browserPath, baseUrl} from './_common.mjs';
 const EDGE = browserPath();
-const URL = process.argv[2] || 'http://127.0.0.1:8770/#live';
+const URL = process.argv[2] || `${baseUrl()}/#live`;
 const PORT = 9333;
 const OUT = process.argv[3] || '';
 
@@ -21,7 +21,7 @@ async function targets() {
     try {
       const r = await fetch(`http://127.0.0.1:${PORT}/json/list`);
       const list = await r.json();
-      const page = list.find(t => t.type === 'page' && t.url.includes('8770'));
+      const page = list.find(t => t.type === 'page' && t.url.startsWith(baseUrl()));
       if (page?.webSocketDebuggerUrl) return page;
     } catch { /* 还没起来 */ }
     await sleep(500);
@@ -45,8 +45,8 @@ const send = (method, params = {}) => new Promise(res => {
 
 await sleep(9000);   // 等前端轮询几轮把事件流填满
 // 直接打接口看后端存了什么（用实时对局的 run_id）
-const lv = await (await fetch('http://127.0.0.1:8770/api/live')).json();
-const ev = await (await fetch('http://127.0.0.1:8770/api/events?id=' +
+const lv = await (await fetch(`${baseUrl()}/api/live`)).json();
+const ev = await (await fetch(`${baseUrl()}/api/events?id=` +
   encodeURIComponent(lv.run_id || '') + '&limit=30')).json();
 console.log(`--- 后端事件记录 (run_id=${lv.run_id}) ---`);
 for (const e of (ev.events || []).slice(0, 16)) {

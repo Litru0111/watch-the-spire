@@ -337,7 +337,7 @@ class Dashboard:
                 speed = float((q.get("speed") or ["4"])[0] or 4)
                 if not seed:
                     return self._json({"error": "缺少 seed 参数"}, 400)
-                # 用 seed 找到 run_id（seed 是存档里的字符串，如 QUXJJ78BYP）
+                # 用 seed 找到 run_id（seed 是存档里的字符串，形如 10~12 位大写字母数字）
                 target = None
                 for r in dash.store.all_run_rows():
                     if str(r["seed"]) == seed or r["run_id"] == seed:

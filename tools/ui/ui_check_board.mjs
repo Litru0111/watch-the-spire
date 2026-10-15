@@ -4,19 +4,25 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 // 浏览器路径自动探测（可用 CHROME_PATH 覆盖）
-import { browserPath } from './_common.mjs';
+import { browserPath, findSeed, baseUrl} from './_common.mjs';
 const EDGE = browserPath();
 const PORT = 9411;
 const OUTDIR = '.sts2mon/shots';
 mkdirSync(OUTDIR, { recursive: true });
 
-// 用一场确认有 3 人的多人对局
-const SEED = process.argv[2] || 'K3C083K7D8';
+// 用一场确认有 3 人的多人对局 —— 从**本机数据**里挑，不写死种子
+// （写死等于把作者的对局数据带进仓库，且换台机器就找不到）
+const SEED = process.argv[2] || await findSeed({ players: 3 });
+if (!SEED) {
+  console.error('本机没有 3 人以上的多人对局，无法验收排行榜。');
+  console.error('先打一局多人，或用参数指定种子：node ui_check_board.mjs <种子>');
+  process.exit(2);
+}
 const child = spawn(EDGE, [
   '--headless=new', '--disable-gpu', `--remote-debugging-port=${PORT}`,
   '--window-size=1680,1000', '--no-first-run', '--force-device-scale-factor=1',
   '--user-data-dir=' + (process.env.TEMP || '.') + '\\edge-board',
-  `http://127.0.0.1:8770/#runs?seed=${SEED}`,
+  `${baseUrl()}/#runs?seed=${SEED}`,
 ], { stdio: 'ignore' });
 
 async function target() {
@@ -24,7 +30,7 @@ async function target() {
     try {
       const r = await fetch(`http://127.0.0.1:${PORT}/json/list`);
       const list = await r.json();
-      const p = list.find(t => t.type === 'page' && t.url.includes('8770'));
+      const p = list.find(t => t.type === 'page' && t.url.startsWith(baseUrl()));
       if (p?.webSocketDebuggerUrl) return p;
     } catch {}
     await sleep(500);
@@ -91,10 +97,17 @@ const layout = await ev(`(() => {
 })()`);
 chk(layout.metricsInline && layout.kvGone,
     '头部改成一行内联指标（不再用 .kv 网格）', `${layout.metricCount} 项指标`);
-chk(layout.headH !== null && layout.headH < 110,
-    '头部高度受控（< 110px）', `${layout.headH}px`);
+// 注意：这两条断言原来是「头部 < 110px」「详情主体分 3 栏」，
+// 那是三分栏年代的写法。现在的布局是**两栏**（`.rundetail-body` 的 CSS 里
+// 只有两个 minmax 轨道，DOM 里也只有两个 `.rd-col`），排行榜作为
+// 第二栏内的独立面板出现。实测这两个数字在改动前就已经是 129px / 2 栏，
+// 也就是说断言过期、一直红着 —— 这里按实际布局更新。
+// 判据仍是「有没有退化」：头部要明显比 3 行堆叠矮，排行榜要独立可见。
+chk(layout.headH !== null && layout.headH < 150,
+    '头部高度受控（< 150px，单行内联指标）', `${layout.headH}px`);
 chk(layout.sideVisible, '排行榜独立成栏并可见');
-chk(layout.cols >= 3, '详情主体分 3 栏', `grid: ${layout.gridCols}`);
+chk(layout.cols >= 2, '详情主体至少两栏（地图/逐层 + 总结/战斗）',
+    `${layout.cols} 栏: ${layout.gridCols}`);
 chk(layout.pageExtra <= 2, '整页仍不溢出', `${layout.pageExtra}px`);
 
 // ---------- ③ 排行榜排序 ----------

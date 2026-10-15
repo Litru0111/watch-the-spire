@@ -104,6 +104,28 @@ export async function connect(opts = {}) {
   return { ev, send, shot, close, child, url };
 }
 
+/**
+ * 从**当前这台机器的数据**里挑一场对局的种子。
+ *
+ * 为什么需要它：界面验收脚本以前把种子写死在源码里（形如 `ABCD1234XY`，
+ * 那种字符串就是玩家某一局对局的标识），那个种子来自作者的存档 ——
+ * 换台机器就找不到那场对局，而且**等于把作者的对局数据写进了公开仓库**。
+ *
+ * 选项 `{ players }`：要求至少这么多玩家（多人局相关检查用）。
+ * 找不到就返回空串，让调用方自己决定是跳过还是报错。
+ */
+export async function findSeed({ players = 0 } = {}) {
+  try {
+    const res = await fetch(`${baseUrl()}/api/runs`);
+    const runs = (await res.json()).runs || [];
+    const ok = runs.filter(r => r.valid !== false
+      && (players ? Number(r.player_count || 1) >= players : true));
+    return ok[0]?.seed || '';
+  } catch {
+    return '';
+  }
+}
+
 /** 简易断言器：累计失败，最后统一报告。 */
 export function reporter() {
   const results = [];

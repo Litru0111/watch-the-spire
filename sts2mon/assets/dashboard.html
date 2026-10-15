@@ -2063,8 +2063,12 @@ function showLiveTip(idx){
 
 /* ---------------- 回放真实对局（模拟实时） ---------------- */
 $('#btnReplay').onclick = async () => {
-  const seed = prompt('输入要回放的对局种子（可用列表里的种子，例如 ' +
-    (runsCache[0]?.seed || 'QUXJJ78BYP') + '）', runsCache[0]?.seed || '');
+  // 提示里只举「列表里那一场的种子」，**不写死任何具体种子** ——
+  // 种子是玩家自己的对局标识，写进仓库等于把作者的对局数据带出去。
+  const cur = runsCache[0]?.seed;
+  const seed = prompt('输入要回放的对局种子' +
+    (cur ? '（可用列表里的种子，例如 ' + cur + '）' : '（先导入历史对局，或从列表里选一场）'),
+    cur || '');
   if (!seed) return;
   const speed = prompt('回放速度倍率（每回合间隔 = 2 秒 / 倍率）', '4') || '4';
   $('#replayNote').textContent = '正在回放…';

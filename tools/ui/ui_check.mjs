@@ -4,9 +4,9 @@ import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 // 浏览器路径自动探测（可用 CHROME_PATH 覆盖）
-import { browserPath } from './_common.mjs';
+import { browserPath, baseUrl} from './_common.mjs';
 const EDGE = browserPath();
-const URL = process.argv[2] || 'http://127.0.0.1:8770/#stats';
+const URL = process.argv[2] || `${baseUrl()}/#stats`;
 const PORT = 9344;
 const WIN = process.argv[3] || '1680,1000';
 
@@ -22,7 +22,7 @@ async function target() {
     try {
       const r = await fetch(`http://127.0.0.1:${PORT}/json/list`);
       const list = await r.json();
-      const p = list.find(t => t.type === 'page' && t.url.includes('8770'));
+      const p = list.find(t => t.type === 'page' && t.url.startsWith(baseUrl()));
       if (p?.webSocketDebuggerUrl) return p;
     } catch {}
     await sleep(500);

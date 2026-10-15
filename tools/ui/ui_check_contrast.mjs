@@ -5,16 +5,23 @@ import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 // 浏览器路径自动探测（可用 CHROME_PATH 覆盖）
-import { browserPath } from './_common.mjs';
+import { browserPath, findSeed, baseUrl} from './_common.mjs';
 const EDGE = browserPath();
 const PORT = 9444;
-const SEED = process.argv[2] || 'K3C083K7D8';
+// 「本机玩家行高亮」只在多人局里才有对比，所以挑一场多人的。
+// 种子从本机数据里取，**不写死**（写死等于把作者的对局数据带进仓库）。
+const SEED = process.argv[2] || await findSeed({ players: 2 });
+if (!SEED) {
+  console.error('本机没有多人对局，无法验收「本机行高亮」。');
+  console.error('先打一局多人，或用参数指定种子：node ui_check_contrast.mjs <种子>');
+  process.exit(2);
+}
 
 const child = spawn(EDGE, [
   '--headless=new', '--disable-gpu', `--remote-debugging-port=${PORT}`,
   '--window-size=1680,1000', '--no-first-run',
   '--user-data-dir=' + (process.env.TEMP || '.') + '\\edge-contrast',
-  `http://127.0.0.1:8770/#runs?seed=${SEED}`,
+  `${baseUrl()}/#runs?seed=${SEED}`,
 ], { stdio: 'ignore' });
 
 async function target() {
@@ -22,7 +29,7 @@ async function target() {
     try {
       const r = await fetch(`http://127.0.0.1:${PORT}/json/list`);
       const list = await r.json();
-      const p = list.find(t => t.type === 'page' && t.url.includes('8770'));
+      const p = list.find(t => t.type === 'page' && t.url.startsWith(baseUrl()));
       if (p?.webSocketDebuggerUrl) return p;
     } catch {}
     await sleep(500);
