@@ -39,6 +39,8 @@
 - **单人 / 多人** —— 多人局按玩家分流，每人一套评分与事件回放，并带排行榜。
 - **从游戏文件提取数据** —— 卡牌/遗物文案与数值直接从 `.pck` 本地化表与
   .NET 程序集里解析出来（纯 Python 实现的元数据与 IL 解析，不依赖 dnSpy 之类工具）。
+- **中文名不依赖 mod** —— 名称库同样从游戏本体的本地化表提取（2606 个 ID），
+  所以敌人/卡牌/遗物/事件都能显示官方中文名，不需要装 DanmakuSpire。
 - **黑箱对局模拟器** —— 不需要启动游戏就能跑端到端回归。
 
 ## 环境要求
@@ -48,7 +50,7 @@
 | 操作系统 | Windows（游戏本体目前只有 Windows 版） |
 | Python | 3.10 或更高 |
 | 游戏 | Slay the Spire 2（用于取数据；没有也能看已有的数据库） |
-| 游戏内 mod | [DamageMeter](https://steamcommunity.com/sharedfiles/filedetails/?id=3747557283)（实时战斗数据）<br>DanmakuSpire（中文名称库，可选） |
+| 游戏内 mod | [DamageMeter](https://steamcommunity.com/sharedfiles/filedetails/?id=3747557283)（实时战斗数据）<br>DanmakuSpire（**不需要**；中文名由 `extract` 从游戏本体提取） |
 
 ## 快速开始
 
@@ -59,7 +61,8 @@ cd watch-the-spire
 REM 0) 环境自检 —— 会逐项告诉你数据源/游戏目录是否就绪
 sts2mon.cmd doctor
 
-REM 1) 从游戏文件提取文案与数值（只需一次，实测约 10 秒）
+REM 1) 从游戏文件提取名称库/文案/数值（只需一次，实测约 10 秒）
+REM    名称库来自游戏本体的本地化表，所以中文名**不需要装任何 mod**
 sts2mon.cmd extract
 
 REM 2) 导入历史对局
@@ -98,7 +101,7 @@ watch-the-spire doctor
 | 页面 | 内容 |
 |---|---|
 | **全局统计** | 角色胜率、进阶分布、死亡原因；附「进度/卡牌」两个子页（逐层遭遇、抓牌倾向） |
-| **对局记录** | 左：对局列表（可切全部/单人/多人）；中：地图与路线、玩家排行榜；右：逐层数据、局后总结（评分+路线+数值曲线）、单场战斗明细 |
+| **对局记录** | 左：对局列表（可切全部/单人/多人；**无效对局不显示**）；中：地图与路线、玩家排行榜；右：逐层数据、局后总结（评分+路线+数值曲线）、单场战斗明细 |
 | **实时监控** | 当前层数/房间、敌我 HP 与出牌、卡牌抓取监控、事件与选择、我方数值预测 |
 
 ## 数据从哪来
@@ -112,7 +115,8 @@ watch-the-spire doctor
 | `skada_run_token.json` | 「新一局」的第一信号 | 同上目录 |
 | `rdps_meter/<seed>.json` | 更细的逐卡伤害/增益 | 同上目录 |
 | `history/*.run` | 对局结束后落盘的完整存档 | `<游戏数据>/steam/<id>/modded/profile*/saves/history/` |
-| `object-catalog.json` | 中文名称库（DanmakuSpire mod 导出） | `<游戏数据>/DanmakuSpire/` |
+| `name_library.json` | 中文名称库（`extract` 从游戏 `.pck` 提取，2606 个 ID） | `.sts2mon/`（本程序自己的数据目录） |
+| `object-catalog.json` | 装了 DanmakuSpire 时并入，**不再必需** | `<游戏数据>/DanmakuSpire/` |
 | `logs/godot.log` | 出牌日志（伤害归因） | `<游戏数据>/logs/` |
 
 `<游戏数据>` 在 Windows 上是 `%APPDATA%\SlayTheSpire2`。
@@ -122,7 +126,9 @@ watch-the-spire doctor
 - 对局存档**离开该层才写入**，所以实时数据有一层延迟；战斗内数据来自 DamageMeter。
 - `.run` 里**没有**「本机是谁」的字段，只能靠存档路径里的 Steam ID 推断。
 - **无法检测是否用过 SL（读档）** —— 游戏不留下任何痕迹。
-- 没装 DanmakuSpire 时，中文名会退化成英文 ID。
+- **中文名不依赖 mod**：由 `extract` 从游戏本体的本地化表提取成名称库；
+  没跑过 `extract` 且没装 DanmakuSpire 时，才会退化成英文 ID。
+  少数**未实装/隐藏内容**在游戏里没有译文，这类 ID 会缺名（属正常，不是提取 bug）。
 
 ## 配置
 
@@ -146,7 +152,7 @@ sts2mon.cmd doctor
 | 命令 | 说明 |
 |---|---|
 | `doctor` | 环境自检：路径解析结果、各数据源是否就绪 |
-| `extract` | 从游戏文件提取文案/数值（公开版不含这些数据） |
+| `extract` | 从游戏文件提取名称库/文案/数值（公开版不含这些数据） |
 | `ingest` | 导入全部历史对局 |
 | `serve` | 启动仪表盘（`--watch` 同时开监控） |
 | `watch` | 实时监控 + 仪表盘 |
@@ -160,6 +166,7 @@ sts2mon.cmd doctor
 ```bat
 python tools\selftest.py                 # 端到端
 python tools\simulate_runs.py --runs 25  # 黑箱模拟器（不需要游戏）
+python tools\verify_sim_kills.py         # 验证模拟器「真能抓到 bug」（注入历史 bug 看是否报错）
 ```
 
 部分测试需要真实存档或提取数据才能跑（会在输出里标明跳过原因，不会假装通过）。
@@ -188,7 +195,8 @@ python tools\simulate_runs.py --runs 25  # 黑箱模拟器（不需要游戏）
 | `sts2mon/effects.py` | 卡牌/遗物文案与数值（含升级增量） |
 | `sts2mon/web.py` | HTTP 服务与 JSON 接口 |
 | `sts2mon/assets/dashboard.html` | 整个前端（单文件，无构建步骤） |
-| `tools/extract_*.py` | 从 `.pck` / `.dll` 提取数据 |
+| `tools/extract_names.py` | 从 `.pck` 提取**名称库**（不依赖任何 mod） |
+| `tools/extract_*.py` | 从 `.pck` / `.dll` 提取文案与数值 |
 | `tools/simulate_runs.py` | 黑箱对局模拟器 |
 
 更多设计说明见 [docs/](docs/)。

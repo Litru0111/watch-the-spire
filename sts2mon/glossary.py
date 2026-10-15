@@ -165,6 +165,41 @@ DEFAULT_CATALOGS = [
     paths.sts2_appdata() / "DanmakuSpire" / "object-catalog.json",
 ]
 
+# 名称库的 kind 字符串 -> 本模块的 kind 常量
+LIB_KIND = {
+    "card": KIND_CARD,
+    "relic": KIND_RELIC,
+    "monster": KIND_MONSTER,
+    "encounter": KIND_MONSTER,
+    "event": KIND_EVENT,
+    "character": KIND_CHARACTER,
+    "potion": KIND_RELIC,
+    "power": KIND_RELIC,
+}
+
+
+def name_library_path() -> Path:
+    """自建名称库的位置（`sts2mon extract` 生成）。每次调用都重新求值。"""
+    return paths.data_dir() / "name_library.json"
+
+
+# 归一化重名时的 kind 优先级：卡牌 > 遗物 > 怪物/遭遇 > 角色 > 事件 > 其它。
+#
+# 中文重名很常见（5 张「打击」、5 张「防御」），而 `canonical()` 只能给
+# 一个答案。选错的后果不是「名字不好看」，而是**功能出错**：
+# `is_card()` 靠 `canonical()` 判定一次出牌是不是卡牌，
+# 判错就会把敌方伤害算到我方头上（见 adapters/damage_meter 的 actor_kind）。
+# 实测 `进阶之灾` 被杂项 `LEVEL_05` 抢走，导致真卡 `ASCENDERS_BANE`
+# 判成非卡牌，模拟器随即报假 bug。
+_NAME_KIND_RANK = {
+    KIND_CARD: 0,
+    KIND_RELIC: 1,
+    KIND_MONSTER: 2,
+    KIND_CHARACTER: 3,
+    KIND_EVENT: 4,
+}
+_NAME_KIND_RANK_DEFAULT = 5
+
 
 def split_id(raw: str) -> tuple[str | None, str]:
     """'CARD.SHRUG_IT_OFF' -> ('CARD', 'SHRUG_IT_OFF')；'SHRUG_IT_OFF' -> (None, ...)"""
@@ -182,13 +217,89 @@ class Glossary:
         self.by_id: dict[str, str] = {}
         self.by_kind: dict[int, dict[str, str]] = {}
         self.by_name: dict[str, str] = {}     # 中文名 -> 规范 ID（用于归一化）
+        self._name_kind: dict[str, int | None] = {}   # 重名裁决用：名 -> kind
         self._owners: dict[str, str] = {}     # 卡牌/遗物 ID -> 归属角色名
         self._duplicate_names: set[str] = set()   # 对应多张卡的重复中文名
         self._potion_cache: dict[str, str] | None = None  # 药水中文名（懒加载）
         self.mod_objects: dict[str, str] = {}
         self.source: str | None = None
+        self.library_size = 0        # 自建名称库条目数（0 = 没跑过 extract）
+        self.catalog_loaded = False  # 是否读到 DanmakuSpire 的 catalog（可选）
+        # 加载顺序 = 优先级：先自建名称库（游戏本体），再 mod 的 catalog。
+        # 早先只认 catalog，于是没装 DanmakuSpire 就只能显示英文 ID。
+        self._load_name_library(name_library_path())
         self._load(catalog_paths or DEFAULT_CATALOGS)
         self._compute_duplicate_names()
+
+    @staticmethod
+    def _rank(oid: str, kind: int | None) -> tuple[int, int, str]:
+        """重名裁决的排序键（越小越优先）。"""
+        return (_NAME_KIND_RANK.get(kind, _NAME_KIND_RANK_DEFAULT)
+                if kind is not None else _NAME_KIND_RANK_DEFAULT,
+                # 同 kind 内优先更短的 ID（`STRIKE` 优于 `STRIKE_IRONCLAD`）
+                len(oid), oid)
+
+    def _register_name(self, name: str, oid: str, kind: int | None) -> None:
+        """登记「中文名 -> 规范 ID」，重名时按 kind 优先级裁决。"""
+        for key in (name, name.lower()):
+            cur = self.by_name.get(key)
+            if cur is None:
+                self.by_name[key] = oid
+                self._name_kind[key] = kind
+                continue
+            if self._rank(oid, kind) < self._rank(cur, self._name_kind.get(key)):
+                self.by_name[key] = oid
+                self._name_kind[key] = kind
+
+    def _register(self, oid: str, name: str, kind: int | None,
+                  owner: str = "", from_mod: bool = False) -> None:
+        """登记一个 ID。**先到先得**，所以调用顺序就是优先级。"""
+        self.by_id.setdefault(oid, name)
+        # 反向索引：本地化名 -> 规范 ID（rdps 等数据源只给本地化名）
+        self._register_name(name, oid, kind)
+        if owner and kind in (KIND_CARD, KIND_RELIC):
+            self._owners.setdefault(oid, owner)
+        if kind is not None:
+            self.by_kind.setdefault(kind, {})[oid] = name
+            # 同时登记带前缀形式，方便 CARD.XXX 查询
+            for prefix, k in PREFIX_KIND.items():
+                if k == kind:
+                    self.by_id.setdefault(f"{prefix}.{oid}", name)
+        if from_mod:
+            self.mod_objects[oid] = name
+
+    def _load_name_library(self, p: Path) -> bool:
+        """加载自建名称库（游戏本体译名）。返回是否加载成功。
+
+        这份是**主源**：它直接从游戏 `.pck` 的本地化表取名字，
+        不依赖任何模组，而且译名与游戏本体一致
+        （实测 `SILENT` 本体是「静默猎手」，DanmakuSpire 的 catalog 写「夜隐猫忍」）。
+        """
+        if not p.is_file():
+            return False
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        entries = data.get("names")
+        if not isinstance(entries, dict) or not entries:
+            return False
+        for oid, e in entries.items():
+            if not isinstance(e, dict):
+                continue
+            nm = (e.get("name") or "").strip()
+            if not oid or not nm:
+                continue
+            kind = LIB_KIND.get(str(e.get("kind") or ""))
+            # 遭遇键**原样保留**（不剥 _WEAK/_NORMAL/_BOSS）：
+            # 游戏给每个强度单独写了原文，比「基础名+（弱）」信息量大得多，
+            # 例如 NIBBITS_NORMAL=「两只小啃兽」、NIBBITS_WEAK=「一只落单的小啃兽」。
+            # 早期用「剥后缀再补（弱）」是因为当时只有单体怪物条目的译名可用。
+            # 精确键查不到时仍会退回那套后缀逻辑（见 encounter()）。
+            self._register(oid, nm, kind)
+        self.source = str(p)
+        self.library_size = len(entries)
+        return True
 
     def _load(self, paths: list[Path]) -> None:
         for p in paths:
@@ -205,23 +316,13 @@ class Glossary:
                 oid, name, kind = o.get("id"), o.get("name"), o.get("kind")
                 if not oid or not name:
                     continue
-                self.by_id.setdefault(oid, name)
-                # 反向索引：本地化名 -> 规范 ID（rdps 等数据源只给本地化名）
-                self.by_name.setdefault(name, oid)
-                self.by_name.setdefault(name.lower(), oid)
-                # 归属角色（卡牌与遗物可能带 ownerCharacterName）
-                owner = o.get("ownerCharacterName")
-                if owner and isinstance(kind, int) and kind in (KIND_CARD, KIND_RELIC):
-                    self._owners[oid] = str(owner)
-                if isinstance(kind, int):
-                    self.by_kind.setdefault(kind, {})[oid] = name
-                    # 同时登记带前缀形式，方便 CARD.XXX 查询
-                    for prefix, k in PREFIX_KIND.items():
-                        if k == kind:
-                            self.by_id.setdefault(f"{prefix}.{oid}", name)
-                if o.get("fromMod"):
-                    self.mod_objects[oid] = name
-            self.source = str(p)
+                self._register(oid, name, kind if isinstance(kind, int) else None,
+                               owner=str(o.get("ownerCharacterName") or ""),
+                               from_mod=bool(o.get("fromMod")))
+            # 名称库已经定过 source 就别覆盖（它是主源）
+            if self.source is None:
+                self.source = str(p)
+            self.catalog_loaded = True
 
     # ---------- 归一化 ----------
     def canonical(self, raw: str | None, kind: int | None = None) -> str:

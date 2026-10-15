@@ -57,7 +57,9 @@ def _api_checks(base: str, store: Store, live: LiveState, g, row: dict, n: int, 
     check(status == 200 and body.get("ok"), "/api/health", json.dumps(body, ensure_ascii=False))
 
     html, _ = get(base + "/")
-    check("杀戮尖塔2" in html and "api/live" in html, "/ 返回仪表盘页面", f"{len(html)} 字节")
+    # 标题已从「杀戮尖塔2 · 数据监控台」改为「Watch the Spire 监控台」，
+    # 所以这里改查新标题（产品名）。
+    check("Watch the Spire" in html and "api/live" in html, "/ 返回仪表盘页面", f"{len(html)} 字节")
 
     ov2, _ = get(base + "/api/overview")
     check(ov2["overview"]["runs"] == n, "/api/overview 场次一致")
@@ -164,10 +166,15 @@ def main() -> int:
     check(True, "rdps 明细匹配", f"{n_rdps} 场")
 
     print("\n② 名称解析")
+    # 遭遇名用**游戏本地化表里的原文**（自建名称库提供的值）。
+    # 以前这里是「外骨骼虫（弱）」「帝皇蟹（Boss）」——那套「基础名+强度后缀」
+    # 是名称库只能拿到单体怪物译名时的权宜之计。现在游戏自己给每个强度
+    # 都写了独立文案，而且信息量更大（如 NIBBITS_NORMAL=「两只小啃兽」、
+    # NIBBITS_WEAK=「一只落单的小啃兽」），所以改用原文。
     cases = {
         "CARD.SHIV": "小刀", "MONSTER.SEAPUNK": "海洋混混",
-        "ENCOUNTER.EXOSKELETONS_WEAK": "外骨骼虫（弱）",
-        "ENCOUNTER.KAISER_CRAB_BOSS": "帝皇蟹（Boss）",   # 译名来自游戏内 UI 文本
+        "ENCOUNTER.EXOSKELETONS_WEAK": "外骨骼虫",
+        "ENCOUNTER.KAISER_CRAB_BOSS": "帝皇蟹",   # 译名来自游戏内 UI 文本
         "RELIC.VAJRA": "金刚杵",
     }
     for raw, want in cases.items():

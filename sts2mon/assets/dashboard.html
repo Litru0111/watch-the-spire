@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>杀戮尖塔2 · 数据监控台</title>
+<title>Watch the Spire 监控台</title>
 <script>
   // 主题要在样式生效前定好，否则会闪一下白/黑
   (function(){
@@ -354,7 +354,7 @@
 </head>
 <body>
 <header>
-  <h1>🐋 杀戮尖塔2 · 数据监控台 <small id="sub">加载中…</small></h1>
+  <h1>Watch the Spire 监控台</h1>
   <span class="pulse" id="pulse"></span>
   <span class="dim" id="livetext" style="font-size:11.5px">实时：未连接</span>
   <div class="themes" id="themes" title="切换主题">
@@ -381,34 +381,34 @@
       <button class="subtab" data-sub="deck">牌组</button>
     </nav>
 
-    <!-- 子页 1：总览（谁在打、打到什么难度、被谁终结） -->
+    <!-- 子页 1：总览（谁在打、打到什么难度、被谁打死的次数） -->
     <div class="subpane" id="sub-overview">
-      <section class="panel s-char"><h3>角色战绩 <span class="tag">胜率 / 场次</span></h3>
+      <section class="panel s-char"><h3>角色战绩</h3>
         <div class="scroll" id="charTable"></div></section>
-      <section class="panel s-asc"><h3>进阶难度 <span class="tag">Ascension</span></h3>
+      <section class="panel s-asc"><h3>进阶难度</h3>
         <div class="scroll" id="ascTable"></div></section>
-      <section class="panel s-death"><h3>死亡热点 <span class="tag">被谁终结</span></h3>
+      <section class="panel s-death"><h3>被害次数</h3>
         <div class="scroll" id="deathTable"></div></section>
     </div>
 
     <!-- 子页 2：进程（压力曲线、遭遇战绩） -->
     <div class="subpane hidden" id="sub-progress">
-      <section class="panel s-chart"><h3>楼层压力曲线 <span class="tag">平均剩余 HP / 平均受伤</span></h3>
+      <section class="panel s-chart"><h3>楼层压力曲线</h3>
         <div class="chartbox" style="flex:1 1 auto;min-height:0">
           <canvas id="floorChart"></canvas>
         </div>
         <div class="legend"><span><i style="background:var(--green)"></i>平均 HP</span>
           <span><i style="background:var(--red)"></i>平均受伤</span>
           <span><i style="background:var(--accent)"></i>样本数</span></div></section>
-      <section class="panel s-enc"><h3>遭遇战绩 <span class="tag">回合 / 受伤 / 死亡率</span></h3>
+      <section class="panel s-enc"><h3>遭遇战绩</h3>
         <div class="scroll" id="encTable"></div></section>
     </div>
 
     <!-- 子页 3：牌组（卡牌表现、选牌倾向） -->
     <div class="subpane hidden" id="sub-deck">
-      <section class="panel s-card"><h3>卡牌表现 <span class="tag">跨对局累计</span></h3>
+      <section class="panel s-card"><h3>卡牌表现</h3>
         <div class="scroll" id="cardTable"></div></section>
-      <section class="panel s-pick"><h3>选牌倾向 <span class="tag">三选一拿走比例</span></h3>
+      <section class="panel s-pick"><h3>选牌倾向</h3>
         <div class="scroll" id="pickTable"></div></section>
     </div>
   </div>
@@ -418,14 +418,9 @@
     <div class="layout">
       <section class="panel" style="padding:10px">
         <h3 style="padding:2px 4px">对局列表 <span class="tag" id="runCount"></span></h3>
-        <!-- 两个维度：先挑有效性（默认只看有效对局），再按人数分。
-             库里可能混着回放残留与「开局就退」的空对局，
-             它们仍可查看，但不该占着默认列表。 -->
-        <nav class="subtabs runfilter" id="runQuality">
-          <span class="slide" id="runQualitySlide"></span>
-          <button class="subtab on" data-quality="valid">有效对局</button>
-          <button class="subtab" data-quality="all">含无效</button>
-        </nav>
+        <!-- 只看有效对局：库里可能混着回放残留与「开局就退」的空对局，
+             这些记录对玩家没有意义，所以在 loadRuns 里就直接过滤掉，
+             界面上不提供「含无效」开关（以前有过，属于多余的开发期入口）。 -->
         <!-- 单人 / 多人分开看：混在一起时多人的那些很难找 -->
         <nav class="subtabs runfilter" id="runFilter">
           <span class="slide" id="runFilterSlide"></span>
@@ -471,7 +466,8 @@
               <div class="scroll" id="floorTable"></div>
             </section>
             <section class="panel hidden" id="summaryPanel">
-              <h3>局后总结 <span class="tag" id="summaryTag"></span></h3>
+              <h3>局后总结 <span class="tag" id="summaryTag"></span><span
+                  class="effhint" id="summaryInfo" style="margin-left:4px;font-size:12.5px">ⓘ</span></h3>
               <div class="scroll" id="summaryBody"></div>
               <div id="summaryRefs" class="hidden"></div>
             </section>
@@ -703,7 +699,7 @@ async function loadStats(){
   $('#deathTable').innerHTML = (dh.by_encounter.length ? tbl(dh.by_encounter,
     '<th>遭遇 / 事件</th><th class="num">次数</th>',
     e => `<tr><td>${esc(e.name)}</td><td class="num">${e.count}</td></tr>`)
-    + '<h3 style="margin-top:12px">按 Act 死亡</h3>' + tbl(dh.by_act,
+    + '<h3 style="margin-top:12px;font-size:11.5px">按 Act 死亡</h3>' + tbl(dh.by_act,
       '<th>Act</th><th class="num">次数</th>', a => `<tr><td>第 ${a.act} 层</td><td class="num">${a.count}</td></tr>`)
     : '<div class="hint">暂无失败记录</div>');
 
@@ -724,7 +720,6 @@ async function loadStats(){
       <i style="width:${Math.min(100,c.pick_rate)}%"></i></div>${c.pick_rate}%</div></td></tr>`);
 
   drawFloorChart(d.floor_curve.floors);
-  $('#sub').textContent = `${o.runs} 场对局 · ${d.glossary ? Object.entries(d.glossary).map(([k,v])=>k+v).join(' / ') : ''}`;
 }
 
 function drawFloorChart(rows){
@@ -808,9 +803,8 @@ function isCustom(r){ return (r.game_mode || 'standard') === 'custom'; }
 /* ---------------- 对局列表 ---------------- */
 let runsCache = [], curRun = null, curCombat = null, curPlayerSel = '';
 let runMode = 'all';          // all | single | multi   （人数维度）
-let runQuality = 'valid';     // valid | all            （有效性维度）
-// 默认只看**有效对局**：库里可能混着回放残留与「开局就退」的空对局
-// （见后端 /api/runs 的 valid / invalid_reason 字段）。
+// 有效性不设开关：`runsCache` 里只有有效对局（loadRuns 过滤掉了
+// 回放残留 / 空对局 / 截断采集，见后端 /api/runs 的 valid 字段）。
 // 记录 #runs?seed=XXX 里指定的对局（switchTab 会重写 hash，所以先存下来）
 const wantSeed = new URLSearchParams((location.hash.split('?')[1]) || '').get('seed') || '';
 
@@ -818,33 +812,17 @@ const wantSeed = new URLSearchParams((location.hash.split('?')[1]) || '').get('s
 // 注意 player_count 有可能是字符串（实测后端给的是 '3'），必须转数字再比。
 const num = v => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 0; };
 function isMulti(r){ return !!(r.multiplayer || num(r.player_count) > 1); }
-function byQuality(list){
-  // 老数据（或后端没给 valid）一律当有效，避免升级后列表突然空了
-  return runQuality === 'valid' ? list.filter(r => r.valid !== false) : list;
-}
 function runsOf(mode){
-  const base = byQuality(runsCache);
-  if (mode === 'multi') return base.filter(isMulti);
-  if (mode === 'single') return base.filter(r => !isMulti(r));
-  return base;
+  if (mode === 'multi') return runsCache.filter(isMulti);
+  if (mode === 'single') return runsCache.filter(r => !isMulti(r));
+  return runsCache;
 }
 
-// 过滤条：更新计数、高亮与滑块（两个维度：有效性 × 人数）
+// 过滤条：更新计数、高亮与滑块（只剩人数一个维度）
 function renderRunFilter(){
-  const valid = runsCache.filter(r => r.valid !== false);
-  const nq = { valid: valid.length, all: runsCache.length };
-  document.querySelectorAll('#runQuality .subtab').forEach(b => {
-    const q = b.dataset.quality;
-    b.classList.toggle('on', q === runQuality);
-    b.innerHTML = ({valid:'有效对局', all:'含无效'})[q] +
-      `<span class="n">${nq[q]}</span>`;
-  });
-  slideTo('#runQuality', '#runQualitySlide', '#runQuality .subtab.on');
-
-  const base = byQuality(runsCache);
-  const n = { all: base.length,
-              single: base.filter(r => !isMulti(r)).length,
-              multi: base.filter(isMulti).length };
+  const n = { all: runsCache.length,
+              single: runsCache.filter(r => !isMulti(r)).length,
+              multi: runsCache.filter(isMulti).length };
   document.querySelectorAll('#runFilter .subtab').forEach(b => {
     const m = b.dataset.mode;
     b.classList.toggle('on', m === runMode);
@@ -853,16 +831,6 @@ function renderRunFilter(){
       `<span class="n">${n[m]}</span>`;
   });
   slideTo('#runFilter', '#runFilterSlide', '.subtab.on');
-}
-
-function switchRunQuality(q){
-  if (!['valid','all'].includes(q)) q = 'valid';
-  runQuality = q;
-  renderRunFilter();
-  renderRunList();
-  $('#runCount').textContent = `${runsOf(runMode).length} / ${runsCache.length} 场`;
-  const first = runsOf(runMode)[0];
-  if (first) showRun(first.run_id);
 }
 
 // 只负责把当前过滤结果画进列表
@@ -904,13 +872,16 @@ function renderRunList(){
 
 async function loadRuns(){
   const d = await api('/api/runs');
-  runsCache = d.runs;
+  // 无效对局（回放残留 / 空对局 / 截断采集）在这里就丢掉，界面上没有入口。
+  // 后端仍会返回它们（valid=false + invalid_reason），
+  // 排查时可以直接看 /api/runs，不必为它留一个用户开关。
+  runsCache = d.runs.filter(r => r.valid !== false);
   renderRunFilter();
   renderRunList();
-  $('#runCount').textContent = `${runsOf(runMode).length} / ${d.runs.length} 场`;
+  $('#runCount').textContent = `${runsOf(runMode).length} 场`;
   // #runs?seed=XXX 可直接定位到某一场（也方便自动化截图）。
   // 指定了对局就自动切到它所属的那一类，否则列表里可能找不到它。
-  let pick = wantSeed ? d.runs.find(r => r.seed === wantSeed || r.run_id === wantSeed) : null;
+  let pick = wantSeed ? runsCache.find(r => r.seed === wantSeed || r.run_id === wantSeed) : null;
   if (pick){
     const want = isMulti(pick) ? 'multi' : 'single';
     if (runMode === 'all') { /* 全部里本来就有，不用切 */ }
@@ -932,7 +903,7 @@ function switchRunMode(mode, opts){
   runMode = mode;
   renderRunFilter();
   renderRunList();
-  $('#runCount').textContent = `${runsOf(mode).length} / ${runsCache.length} 场`;
+  $('#runCount').textContent = `${runsOf(mode).length} 场`;
   if (!(opts && opts.keepSel)){
     // 原先选中的对局可能不在新列表里，那就自动选第一个，别让右侧空着
     const still = prev && runsOf(mode).some(r => r.run_id === prev);
@@ -948,8 +919,6 @@ function switchRunMode(mode, opts){
     }
   }
 }
-document.querySelectorAll('#runQuality .subtab').forEach(b =>
-  b.onclick = () => switchRunQuality(b.dataset.quality));
 document.querySelectorAll('#runFilter .subtab').forEach(b =>
   b.onclick = () => switchRunMode(b.dataset.mode));
 
@@ -1140,7 +1109,12 @@ function renderSummary(s){
   const sc = s.score, st = s.stats;
   const gc = GRADE_COLOR[sc.grade] || '#8e9cb5';
   const multi = (s.per_player || []).length > 1;
-  $('#summaryTag').textContent = `${sc.calibration_runs} 场历史作参照 · ${sc.method || ''}` +
+  // 标题右侧的 ⓘ：方法说明与各维度含义都收在这里，鼠标悬停才展开成小窗，
+  // 面板里不再平铺这些说明文字（省地方，也少一层视觉噪音）。
+  const dims = sc.items.map(it => `${it.label}：${it.detail}`).join('\n');
+  $('#summaryInfo').title = [sc.method, dims].filter(Boolean).join('\n\n');
+  // 口径与维度说明已挪到 ⓘ，这里只留「参照样本数 + 多人视角」这类本局信息
+  $('#summaryTag').textContent = `${sc.calibration_runs} 场历史作参照` +
     (multi ? ` · 多人对局（当前视角：${s.character_name || '—'}）` : '');
 
   // 多人对局：并排展示每位玩家的评分与核心数值，一眼看出谁强谁弱
@@ -1178,8 +1152,7 @@ function renderSummary(s){
         it.ratio>=75?'var(--green)':(it.ratio>=50?'var(--accent)':(it.ratio>=30?'var(--gold)':'var(--red)'))}"></i></div>
       <span style="width:78px;text-align:right;font-variant-numeric:tabular-nums">${it.score}<span class="dim">/${it.full}</span></span>
       <span style="width:38px;text-align:right" class="dim">${it.ratio}%</span>
-    </div>
-    <div class="hint" style="margin:-2px 0 8px 72px">${esc(it.detail)}</div>`).join('');
+    </div>`).join('');
 
   // 参考项（不计分）：目前只有「牌组质量」——通关样本不足时它排序不可靠，
   // 所以单独用灰色卡片展示，明确标注「仅供参考、不计分」
@@ -1189,7 +1162,6 @@ function renderSummary(s){
       <div style="display:flex;align-items:center;gap:8px">
         <span class="pill" style="opacity:.8">参考</span>
         <b style="font-size:12.5px">${esc(r.label)}</b>
-        <span class="dim" style="font-size:11px">不计入总分</span>
       </div>
       <div class="hint" style="margin-top:5px">${esc((r.detail||'').replace(/\*\*/g,''))}</div>
     </div>`).join('');
@@ -2114,17 +2086,9 @@ if (['stats','runs','live'].includes(initialTab)) {
 // 统计页的子页也要恢复（刷新后不该跳回第一页）
 const initSub = new URLSearchParams((location.hash.split('?')[1]) || '').get('sub') || 'overview';
 switchSub(initSub);
-// 标题下的简介只在统计页加载时才更新，别的页签会一直停在「加载中…」。
-// 这里独立拉一次，任何入口进来都能填上。
-(async () => {
-  try {
-    const d = await api('/api/overview');
-    const o = d.overview;
-    const g = d.glossary || {};
-    $('#sub').textContent = `${o.runs} 场对局` +
-      (Object.keys(g).length ? ' · ' + Object.entries(g).map(([k, v]) => k + v).join(' / ') : '');
-  } catch (e) {}
-})();
+// 标题旁原先有个 #sub 简介（场次数 + 名称库规模）。场次数在总览的
+// 「总对局」卡片里已经有了，名称库统计是冗余信息，所以整块拿掉了。
+// 连带那个「独立拉一次 /api/overview 填简介」的兜底请求也一并删除。
 setInterval(() => { if (!$('#tab-stats').classList.contains('hidden')) loadStats(); }, 15000);
 </script>
 </body>

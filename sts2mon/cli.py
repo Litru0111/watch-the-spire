@@ -147,7 +147,9 @@ def cmd_extract(args) -> int:
     env[paths.ENV_GAME] = str(g)
     env[paths.ENV_DATA] = str(out_dir)
     env["PYTHONIOENCODING"] = "utf-8"
-    steps = [("文案（pck 本地化）", "extract_effects.py"),
+    # 名称库排第一：它是主源，且不依赖任何模组。
+    steps = [("名称库（pck 本地化，不需要 mod）", "extract_names.py"),
+             ("文案（pck 本地化）", "extract_effects.py"),
              ("数值（.NET 程序集）", "extract_values.py"),
              ("状态名对照（从文案挖）", "build_power_names.py")]
     failed = 0
@@ -156,8 +158,10 @@ def cmd_extract(args) -> int:
         if not path.is_file():
             print(f"[!] 跳过 {label}：找不到 {script}")
             continue
-        if not args.force and (out_dir / "card_effects.json").is_file() \
-                and script == "extract_effects.py":
+        # 已有产物就跳过（--force 强制重跑）。每个脚本认自己的产物文件。
+        artifact = {"extract_names.py": "name_library.json",
+                    "extract_effects.py": "card_effects.json"}.get(script)
+        if not args.force and artifact and (out_dir / artifact).is_file():
             print(f"[·] {label}: 已有数据，跳过（--force 可强制重跑）")
             continue
         print(f"[…] {label} —— {script}")
@@ -173,7 +177,8 @@ def cmd_extract(args) -> int:
             for ln in (r.stderr or "").strip().splitlines()[-4:]:
                 print(f"      {ln}")
     print()
-    for name in ("card_effects.json", "card_values.json", "power_names.json"):
+    for name in ("name_library.json", "card_effects.json", "card_values.json",
+                 "power_names.json"):
         f = out_dir / name
         print(f"   {'✓' if f.is_file() else '✗'} {name}"
               + (f"  {f.stat().st_size // 1024} KB" if f.is_file() else "  缺失"))
@@ -197,12 +202,15 @@ def cmd_doctor(args) -> int:
         print(f"[{mark}] {label}: {info[key]}")
     print()
 
-    # 1. 名称库
-    if ctx.g.source:
-        print(f"[✓] 名称库来源: {ctx.g.source}")
+    # 1. 名称库：自建的是主源（不需要任何 mod），catalog 只是可选补充
+    if ctx.g.library_size:
+        print(f"[✓] 名称库: {ctx.g.library_size} 个 ID（来自游戏本体，不需要 mod）")
     else:
-        print("[!] 未找到 object-catalog.json（中文名会退化为英文 ID）")
-        print("    这是游戏内 mod 导出的文件；订阅 DanmakuSpire 后进一次游戏即可生成。")
+        print("[!] 自建名称库缺失 -> 运行 `extract` 生成（约 4 秒，需要游戏本体）")
+    if ctx.g.catalog_loaded:
+        print(f"[·] 补充目录: {ctx.g.source}（可选）")
+    elif not ctx.g.library_size:
+        print("    没有名称库也没有 mod 目录时，中文名会退化为英文 ID。")
 
     # 1b. 提取数据（公开版不含，需要本地跑一次 extract）
     fx = paths.data_dir() / "card_effects.json"

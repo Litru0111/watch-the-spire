@@ -12,6 +12,7 @@ card_effects.json
 card_values.json
 power_names.json
 observed_card_values.json
+name_library.json
 
 # ---- 运行产物 ------------------------------------------------------------------
 *.log

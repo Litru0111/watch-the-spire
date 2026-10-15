@@ -436,6 +436,33 @@ class SimRunner:
                        "HP 未被标记为实测",
                        f"hp_authoritative={snap.get('hp_authoritative')}")
 
+            # 预测面板（界面 renderPrediction）也吃这份 HP：它必须同样是实测值。
+            # 从前只断言上面的 hp，于是 `_prediction_locked` 里「HP 用不用实测值」
+            # 那段代码完全没有覆盖 —— 把它改成「max_hp − 累计承伤」后
+            # 模拟器依然全绿，可界面上会出现 45/89 这种明显错的数字。
+            #
+            # 注意：第一层（ancient）还没有任何承伤样本，预测面板会正常地
+            # available=False（_prediction_locked 提前返回，没有 est_hp 字段），
+            # 所以这里只在**面板可用**时才核对数值。
+            ours = live.run_local_key()
+            node_me = live.tracker.current_node.stat(ours) if live.tracker.current_node else None
+            pred = snap.get("prediction") or {}
+            if pred.get("available") is True:
+                self.check(node_me is not None and node_me.hp is not None,
+                           run_id, room.floor,
+                           "预测面板可用但存档里没有实测 HP（不该发生）",
+                           f"node_me={'None' if node_me is None else node_me.hp}")
+                self.check(pred.get("est_hp") == (node_me.hp if node_me else None),
+                           run_id, room.floor,
+                           "预测面板的 HP 不等于实测值（退化成了推算）",
+                           f"预测={pred.get('est_hp')} 实测={getattr(node_me, 'hp', None)}")
+                self.check(pred.get("hp_authoritative") is True, run_id, room.floor,
+                           "预测面板的 HP 未被标记为实测",
+                           f"hp_authoritative={pred.get('hp_authoritative')}")
+                self.check(pred.get("estimated_hp") is False, run_id, room.floor,
+                           "实测 HP 却被打上「推算值·不可靠」标记",
+                           f"estimated_hp={pred.get('estimated_hp')}")
+
             # ---- 2. 战斗源：逐回合 ----
             # 换房间时战斗源是全新的（它只记录当前遭遇），所以重置 diff 基线，
             # 否则会把上一场的累计值和事件流整批重放（重复计数）
