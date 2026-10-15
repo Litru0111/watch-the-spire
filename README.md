@@ -7,7 +7,7 @@
 
 > ## ⚠️ 一些注意事项
 >
-> **本项目由AI制作。若您无法接受AI项目，请不要下载。后续可能还会使用agent进行更新及维护，包括README的编写。**
+> **本项目由AI制作。若您无法接受AI项目，请不要下载。后续可能还会使用agent进行更新及维护，可能包括README和Changelog的编写。**
 > 
 > **本项目目前仅支持简体中文。Simplified Chinese only currently. Translations for other languages are in further updates.**
 > 
